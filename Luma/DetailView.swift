@@ -74,6 +74,10 @@ struct DetailView: View {
                     .id(insight.id)
                 }
 
+            case .some(.customInstrumentDef(let defID)):
+                CustomInstrumentEditorView(defID: defID, workspace: workspace)
+                    .id(defID)
+
             case .some(.package(let packageID)):
                 if let package = workspace.engine.installedPackages.first(where: { $0.id == packageID }) {
                     PackageDetailView(package: package, workspace: workspace, selection: $selection)

@@ -77,8 +77,8 @@ struct EventStreamView: View {
                         isAtBottom = true
                         scrollToLastToken &+= 1
                     }
-                    .onChange(of: workspace.engine.eventLog.totalReceived) { _, newVersion in
-                        handleEventVersionChange(newVersion)
+                    .onChange(of: workspace.engine.eventLog.flushVersion) { _, _ in
+                        handleEventVersionChange(workspace.engine.eventLog.totalReceived)
                     }
                     .onChange(of: scrollToLastToken) { _, _ in
                         guard let last = filteredEvents.last else { return }

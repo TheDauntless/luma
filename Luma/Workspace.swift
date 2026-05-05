@@ -42,6 +42,22 @@ final class Workspace: ObservableObject {
                 ui: HookPackUI(manifest: pack.manifest)
             )
         }
+
+        refreshCustomInstrumentUIs()
+        engine.customInstruments.observers.append { [weak self] in
+            self?.refreshCustomInstrumentUIs()
+            self?.objectWillChange.send()
+        }
+    }
+
+    private func refreshCustomInstrumentUIs() {
+        let registry = InstrumentUIRegistry.shared
+        for def in engine.customInstruments.defs {
+            registry.register(
+                for: "custom:\(def.id.uuidString)",
+                ui: CustomInstrumentUI(defID: def.id)
+            )
+        }
     }
 
     // MARK: - Persistence

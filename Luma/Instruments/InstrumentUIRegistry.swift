@@ -19,6 +19,8 @@ final class InstrumentUIRegistry {
             return uis["hook-pack:\(instance.sourceIdentifier)"]
         case .codeShare:
             return uis["codeshare:\(instance.sourceIdentifier)"] ?? uis["codeshare"]
+        case .custom:
+            return uis["custom:\(instance.sourceIdentifier)"] ?? uis["custom"]
         }
     }
 

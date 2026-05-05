@@ -16,8 +16,13 @@ struct HookPackConfigView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(manifest.features) { feature in
-                            Toggle(isOn: binding(for: feature)) {
+                            HStack(alignment: .top, spacing: 8) {
                                 Text(feature.name)
+                                    .frame(width: 200, alignment: .leading)
+                                FeatureValueEditor(
+                                    schema: .boolean,
+                                    value: featureValueBinding(for: feature)
+                                )
                             }
                         }
                     }
@@ -28,16 +33,16 @@ struct HookPackConfigView: View {
         }
     }
 
-    private func binding(for feature: HookPackManifest.Feature) -> Binding<Bool> {
+    private func featureValueBinding(for feature: HookPackManifest.Feature) -> Binding<FeatureValue> {
         Binding(
-            get: {
-                config.features[feature.id] != nil
-            },
+            get: { .boolean(config.features[feature.id] != nil) },
             set: { newValue in
-                if newValue {
-                    config.features[feature.id] = FeatureConfig()
-                } else {
-                    config.features.removeValue(forKey: feature.id)
+                if case .boolean(let enabled) = newValue {
+                    if enabled {
+                        config.features[feature.id] = FeatureConfig()
+                    } else {
+                        config.features.removeValue(forKey: feature.id)
+                    }
                 }
             }
         )

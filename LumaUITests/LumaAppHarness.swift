@@ -235,6 +235,27 @@ final class LumaAppHarness {
         row.click()
     }
 
+    func addCustomInstrument(timeout: TimeInterval = 30) throws {
+        app.activate()
+        let window = try requireDocumentWindow()
+        window.click()
+        app.typeKey("i", modifierFlags: [.command, .shift])
+
+        let newRow = app.descendants(matching: .any)
+            .matching(identifier: "addInstrument.descriptor.custom:__new__").firstMatch
+        if !newRow.waitForExistence(timeout: timeout) {
+            throw LumaAppHarnessError.elementNotFound("addInstrument.descriptor.custom:__new__")
+        }
+        newRow.click()
+
+        let addButton = app.descendants(matching: .any)
+            .matching(identifier: "addInstrument.add").firstMatch
+        if !addButton.waitForExistence(timeout: timeout) {
+            throw LumaAppHarnessError.elementNotFound("addInstrument.add")
+        }
+        addButton.click()
+    }
+
     func captureScreenshot(named name: String) {
         let shot = app.screenshot()
         let attachment = XCTAttachment(screenshot: shot)

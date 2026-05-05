@@ -10,6 +10,7 @@ struct SidebarView: View {
 
     var sessions: [LumaCore.ProcessSession] { workspace.engine.sessions }
     var packages: [LumaCore.InstalledPackage] { workspace.engine.installedPackages }
+    var customInstrumentDefs: [LumaCore.CustomInstrumentDef] { workspace.engine.customInstruments.defs }
 
     var body: some View {
         List(selection: $selection) {
@@ -67,6 +68,19 @@ struct SidebarView: View {
                     }
                 }
 
+            }
+
+            if !customInstrumentDefs.isEmpty {
+                Section("Custom Instruments") {
+                    ForEach(customInstrumentDefs) { def in
+                        SidebarCustomInstrumentDefRow(
+                            def: def,
+                            workspace: workspace,
+                            selection: $selection
+                        )
+                        .tag(SidebarItemID.customInstrumentDef(def.id))
+                    }
+                }
             }
 
             if !packages.isEmpty {
@@ -458,6 +472,149 @@ private struct SidebarITraceCaptureRow: View {
         // but we can at least clean up the selection
         if selection == .itraceCapture(session.id, capture.id) {
             selection = .repl(session.id)
+        }
+    }
+}
+
+struct SidebarCustomInstrumentDefRow: View {
+    let def: LumaCore.CustomInstrumentDef
+    @ObservedObject var workspace: Workspace
+    @Binding var selection: SidebarItemID?
+
+    @State private var isShowingRename = false
+    @State private var isShowingFeatures = false
+    @State private var isShowingDeleteConfirm = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: def.iconSystemName)
+                .foregroundStyle(.tint)
+            Text(def.name)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .accessibilityIdentifier("sidebar.customInstrument.\(def.id.uuidString)")
+        .contextMenu {
+            Button {
+                isShowingRename = true
+            } label: {
+                Label("Rename & Icon\u{2026}", systemImage: "pencil")
+            }
+            Button {
+                isShowingFeatures = true
+            } label: {
+                Label("Features\u{2026}", systemImage: "switch.2")
+            }
+            Button(role: .destructive) {
+                isShowingDeleteConfirm = true
+            } label: {
+                Label("Delete Custom Instrument", systemImage: "trash")
+            }
+        }
+        .popover(isPresented: $isShowingRename, arrowEdge: .trailing) {
+            CustomInstrumentRenamePopover(
+                def: def,
+                workspace: workspace
+            )
+        }
+        .popover(isPresented: $isShowingFeatures, arrowEdge: .trailing) {
+            CustomInstrumentFeaturesPopover(
+                def: def,
+                workspace: workspace
+            )
+        }
+        .confirmationDialog(
+            "Delete \"\(def.name)\"?",
+            isPresented: $isShowingDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task { @MainActor in
+                    await workspace.engine.deleteCustomInstrument(def.id)
+                    if selection == .customInstrumentDef(def.id) {
+                        selection = .notebook
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the custom instrument from the project and from any sessions where it is loaded.")
+        }
+    }
+}
+
+struct CustomInstrumentRenamePopover: View {
+    let def: LumaCore.CustomInstrumentDef
+    @ObservedObject var workspace: Workspace
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var draftName: String = ""
+    @State private var draftIcon: String = ""
+
+    static let iconChoices: [String] = [
+        "wand.and.stars",
+        "puzzlepiece.extension",
+        "ant",
+        "magnifyingglass",
+        "gauge.with.dots.needle.50percent",
+        "antenna.radiowaves.left.and.right",
+        "shield",
+        "bolt",
+        "key",
+        "lock",
+        "network",
+        "cpu",
+        "memorychip",
+        "doc.text.magnifyingglass",
+        "pin",
+        "scope",
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Rename Instrument").font(.headline)
+            TextField("Name", text: $draftName)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("customInstrument.rename.name")
+            Text("Icon").font(.subheadline)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28)), count: 8), spacing: 6) {
+                ForEach(Self.iconChoices, id: \.self) { name in
+                    Button {
+                        draftIcon = name
+                    } label: {
+                        Image(systemName: name)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(draftIcon == name ? Color.accentColor.opacity(0.25) : .clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") { commit() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(12)
+        .frame(width: 320)
+        .onAppear {
+            draftName = def.name
+            draftIcon = def.iconSystemName
+        }
+    }
+
+    private func commit() {
+        var updated = def
+        updated.name = draftName.trimmingCharacters(in: .whitespaces)
+        updated.iconSystemName = draftIcon
+        Task { @MainActor in
+            await workspace.engine.updateCustomInstrument(updated)
+            dismiss()
         }
     }
 }

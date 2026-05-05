@@ -51,6 +51,37 @@ final class LumaUITests: XCTestCase {
     }
 
     @MainActor
+    func testCreateCustomInstrument() async throws {
+        let alice = try makeUser(label: "alice", tokenEnv: "LUMA_TEST_TOKEN_ALICE")
+        addTeardownBlock { alice.cleanup() }
+
+        let observed = try ObservedProcess()
+        try observed.launch()
+        addTeardownBlock { Task { @MainActor in observed.terminate() } }
+
+        let app = LumaAppHarness(user: alice)
+        app.launch()
+        addTeardownBlock { Task { @MainActor in app.terminate() } }
+
+        try app.newDocument()
+        try app.attach(toProcessNamed: observed.processName)
+
+        try app.addCustomInstrument()
+
+        try await waitUntil(timeout: 15) { @MainActor in
+            let rows = app.app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.customInstrument.'"))
+                .allElementsBoundByIndex
+            print("[testCreateCustomInstrument] sidebar custom rows=\(rows.count)")
+            return !rows.isEmpty
+        }
+
+        let editor = app.app.descendants(matching: .any)
+            .matching(identifier: "customInstrument.editor").firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), "Custom instrument editor did not appear")
+    }
+
+    @MainActor
     func testCollaborativeMachoInspection() async throws {
         let bob = try makeUser(label: "bob", tokenEnv: "LUMA_TEST_TOKEN_BOB")
         addTeardownBlock { bob.cleanup() }

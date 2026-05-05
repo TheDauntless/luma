@@ -98,8 +98,8 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures/observed.c,
-				Resources/frida-gadget.dylib,
-				Resources/frida-gadget.config,
+				"Resources/frida-gadget.config",
+				"Resources/frida-gadget.dylib",
 			);
 			target = 0CB2C66F2FA5411700426A24 /* LumaUITests */;
 		};

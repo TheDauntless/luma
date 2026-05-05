@@ -27,6 +27,16 @@ struct AddInstrumentSheet: View {
         workspace.engine.descriptors
     }
 
+    private var builtinDescriptors: [InstrumentDescriptor] {
+        descriptors.filter { $0.kind != .custom }
+    }
+
+    private var customDescriptors: [InstrumentDescriptor] {
+        descriptors.filter { $0.kind == .custom }
+    }
+
+    private static let newCustomDescriptorID: String = "custom:__new__"
+
     private var selectedDescriptor: InstrumentDescriptor? {
         guard let id = selectedDescriptorID else { return nil }
         return descriptors.first { $0.id == id }
@@ -45,9 +55,28 @@ struct AddInstrumentSheet: View {
 
     private var compactBody: some View {
         NavigationStack(path: $compactPath) {
-            List(descriptors) { descriptor in
-                NavigationLink(value: descriptor.id) {
-                    descriptorRow(descriptor)
+            List {
+                Section {
+                    ForEach(builtinDescriptors) { descriptor in
+                        NavigationLink(value: descriptor.id) {
+                            descriptorRow(descriptor)
+                        }
+                    }
+                }
+                Section("Custom Instruments") {
+                    ForEach(customDescriptors) { descriptor in
+                        NavigationLink(value: descriptor.id) {
+                            descriptorRow(descriptor)
+                        }
+                    }
+                    Button {
+                        Task { @MainActor in
+                            await createNewCustomAndDismiss()
+                        }
+                    } label: {
+                        Label("New Custom Instrument\u{2026}", systemImage: "plus.circle")
+                    }
+                    .accessibilityIdentifier("addInstrument.descriptor.\(Self.newCustomDescriptorID)")
                 }
             }
             .navigationTitle("Add Instrument")
@@ -75,19 +104,40 @@ struct AddInstrumentSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var descriptorList: some View {
+        Section {
+            ForEach(builtinDescriptors) { descriptor in
+                descriptorRow(descriptor).tag(descriptor.id)
+            }
+        }
+        Section("Custom Instruments") {
+            ForEach(customDescriptors) { descriptor in
+                descriptorRow(descriptor).tag(descriptor.id)
+            }
+            HStack {
+                Image(systemName: "plus.circle")
+                Text("New Custom Instrument\u{2026}")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("addInstrument.descriptor.\(Self.newCustomDescriptorID)")
+            .tag(Self.newCustomDescriptorID)
+        }
+    }
+
     private var regularBody: some View {
         NavigationSplitView {
             List(selection: $selectedDescriptorID) {
-                ForEach(descriptors) { descriptor in
-                    descriptorRow(descriptor).tag(descriptor.id)
-                }
+                descriptorList
             }
             .frame(minWidth: 240, idealWidth: 260)
             .listStyle(.sidebar)
             .navigationTitle("Add Instrument")
         } detail: {
             Group {
-                if let descriptor = selectedDescriptor {
+                if selectedDescriptorID == Self.newCustomDescriptorID {
+                    newCustomDetail
+                } else if let descriptor = selectedDescriptor {
                     detailContent(descriptor: descriptor)
                 } else {
                     Text("Select an instrument to configure.")
@@ -98,13 +148,48 @@ struct AddInstrumentSheet: View {
             .toolbar { sharedToolbar }
         }
         .onChange(of: selectedDescriptorID) { _, newID in
-            guard
-                let id = newID,
-                let desc = descriptors.first(where: { $0.id == id })
-            else { return }
-
+            guard let id = newID else { return }
+            if id == Self.newCustomDescriptorID {
+                initialConfigJSON = Data()
+                return
+            }
+            guard let desc = descriptors.first(where: { $0.id == id }) else { return }
             initialConfigJSON = desc.makeInitialConfigJSON()
         }
+    }
+
+    @MainActor
+    private func createNewCustomAndDismiss() async {
+        let def = workspace.engine.createCustomInstrument()
+        let configJSON = CustomInstrumentConfig(
+            defID: def.id,
+            features: CustomInstrumentLibrary.initialFeatureStates(for: def)
+        ).encode()
+        let added = await workspace.engine.addInstrument(
+            kind: .custom,
+            sourceIdentifier: def.id.uuidString,
+            configJSON: configJSON,
+            sessionID: session.id
+        )
+        if let added {
+            onInstrumentAdded?(added)
+        }
+        selection = .customInstrumentDef(def.id)
+        dismiss()
+    }
+
+    @ViewBuilder
+    private var newCustomDetail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 32))
+            Text("Create a Custom Instrument")
+                .font(.headline)
+            Text("Custom instruments are TypeScript snippets you write inline. They are saved with the project, can be added to multiple sessions, and synchronized when collaboration is enabled. After creating one you can rename it, choose an icon, and define toggleable features from the sidebar.")
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding()
     }
 
     @ViewBuilder
@@ -147,6 +232,10 @@ struct AddInstrumentSheet: View {
             Button("Add") {
                 commitCoordinator.flushPendingEdits()
                 Task { @MainActor in
+                    if selectedDescriptorID == Self.newCustomDescriptorID {
+                        await createNewCustomAndDismiss()
+                        return
+                    }
                     if let descriptor = selectedDescriptor {
                         let newInstrument = await workspace.engine.addInstrument(
                             kind: descriptor.kind,
@@ -161,7 +250,7 @@ struct AddInstrumentSheet: View {
                     dismiss()
                 }
             }
-            .disabled(selectedDescriptor == nil)
+            .disabled(selectedDescriptor == nil && selectedDescriptorID != Self.newCustomDescriptorID)
             .accessibilityIdentifier("addInstrument.add")
         }
         ToolbarItem(placement: .automatic) {

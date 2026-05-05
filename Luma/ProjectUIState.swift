@@ -25,4 +25,5 @@ enum SidebarItemID: Codable, Hashable {
     case insight(UUID, UUID)
     case itraceCapture(UUID, UUID)
     case package(UUID)
+    case customInstrumentDef(UUID)
 }
