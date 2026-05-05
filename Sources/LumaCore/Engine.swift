@@ -960,18 +960,30 @@ public final class Engine {
         }
     }
 
-    public func descriptor(for instance: InstrumentInstance) -> InstrumentDescriptor? {
+    public func descriptor(for instance: InstrumentInstance) -> InstrumentDescriptor {
         switch instance.kind {
         case .tracer:
-            return descriptorsByID["tracer"]
+            return descriptorsByID["tracer"] ?? Self.missingDescriptor(for: instance)
         case .hookPack:
-            return descriptorsByID["hook-pack:\(instance.sourceIdentifier)"]
+            return descriptorsByID["hook-pack:\(instance.sourceIdentifier)"] ?? Self.missingDescriptor(for: instance)
         case .codeShare:
             return descriptorsByID["codeshare:\(instance.sourceIdentifier)"]
                 ?? makeCodeShareDescriptor(for: instance)
+                ?? Self.missingDescriptor(for: instance)
         case .custom:
-            return descriptorsByID["custom:\(instance.sourceIdentifier)"]
+            return descriptorsByID["custom:\(instance.sourceIdentifier)"] ?? Self.missingDescriptor(for: instance)
         }
+    }
+
+    private static func missingDescriptor(for instance: InstrumentInstance) -> InstrumentDescriptor {
+        InstrumentDescriptor(
+            id: "missing:\(instance.id.uuidString)",
+            kind: instance.kind,
+            sourceIdentifier: instance.sourceIdentifier,
+            displayName: "Missing instrument",
+            icon: .symbolic("puzzle"),
+            makeInitialConfigJSON: { Data("{}".utf8) }
+        )
     }
 
     private func refreshCustomInstrumentDescriptors() {
@@ -997,7 +1009,7 @@ public final class Engine {
             kind: .codeShare,
             sourceIdentifier: instance.sourceIdentifier,
             displayName: cfg.name,
-            icon: .system("cloud"),
+            icon: .symbolic("cloud"),
             makeInitialConfigJSON: { try! JSONEncoder().encode(cfg) }
         )
     }
@@ -1007,7 +1019,7 @@ public final class Engine {
         kind: .tracer,
         sourceIdentifier: "builtin.tracer",
         displayName: "Tracer",
-        icon: .system("arrow.triangle.branch"),
+        icon: .symbolic("branch"),
         makeInitialConfigJSON: {
             try! JSONEncoder().encode(TracerConfig())
         },
@@ -2072,19 +2084,20 @@ public final class Engine {
     @discardableResult
     public func createCustomInstrument(
         name: String = "Custom Instrument",
-        iconSystemName: String = "wand.and.stars",
+        icon: InstrumentIcon = .symbolic(InstrumentIconCatalog.default.id),
         source: String = CustomInstrumentDef.exampleSource
     ) -> CustomInstrumentDef {
         let now = Date()
         let def = CustomInstrumentDef(
             name: uniquedCustomInstrumentName(name),
-            iconSystemName: iconSystemName,
+            icon: icon,
             source: source,
             features: [],
             createdAt: now,
             updatedAt: now
         )
         try? store.save(def)
+        registerDescriptor(customInstruments.descriptor(for: def))
         broadcastCustomInstrumentUpsert(def)
         onSessionListChanged?(.customInstrumentDefsChanged)
         return def
@@ -2095,6 +2108,7 @@ public final class Engine {
         updated.normalize()
         updated.updatedAt = Date()
         try? store.save(updated)
+        registerDescriptor(customInstruments.descriptor(for: updated))
         broadcastCustomInstrumentUpsert(updated)
         onSessionListChanged?(.customInstrumentDefsChanged)
         await reloadCustomInstrumentInstances(def: updated)

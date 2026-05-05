@@ -6,22 +6,19 @@ struct InstrumentIconView: View {
     var pointSize: CGFloat = 12
 
     var body: some View {
-        Group {
-            switch icon {
-            case .system(let name):
-                Image(systemName: name)
-                    .font(.system(size: pointSize))
-
-            case .file(let url):
-                fileImage(url: url)
-            }
+        switch icon {
+        case .symbolic(let id):
+            Image(systemName: InstrumentIconCatalog.concept(forID: id).sfSymbol)
+                .font(.system(size: pointSize))
+        case .pixels(let data):
+            pixelsImage(data: data)
         }
     }
 
     @ViewBuilder
-    private func fileImage(url: URL) -> some View {
+    private func pixelsImage(data: Data) -> some View {
         #if canImport(AppKit)
-            if let nsImage = NSImage(contentsOf: url) {
+            if let nsImage = NSImage(data: data) {
                 Image(nsImage: nsImage)
                     .resizable()
                     .interpolation(.high)
@@ -31,7 +28,7 @@ struct InstrumentIconView: View {
                 fallback
             }
         #elseif canImport(UIKit)
-            if let uiImage = UIImage(contentsOfFile: url.path) {
+            if let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)

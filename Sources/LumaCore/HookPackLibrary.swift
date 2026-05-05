@@ -23,18 +23,7 @@ public final class HookPackLibrary {
 
     public func descriptors() -> [InstrumentDescriptor] {
         packs.map { pack in
-            let icon: InstrumentIcon
-            if let iconMeta = pack.manifest.icon {
-                if let file = iconMeta.file {
-                    icon = .file(pack.folderURL.appendingPathComponent(file))
-                } else if let system = iconMeta.systemName {
-                    icon = .system(system)
-                } else {
-                    icon = .system("puzzlepiece.extension")
-                }
-            } else {
-                icon = .system("puzzlepiece.extension")
-            }
+            let icon = hookPackIcon(pack: pack)
 
             let packID = pack.manifest.id
             let defaultEnabled = Dictionary(
@@ -56,6 +45,21 @@ public final class HookPackLibrary {
                 }
             )
         }
+    }
+
+    private func hookPackIcon(pack: HookPack) -> InstrumentIcon {
+        let fallback = InstrumentIcon.symbolic("puzzle")
+        guard let iconMeta = pack.manifest.icon else { return fallback }
+        if let file = iconMeta.file {
+            let fileURL = pack.folderURL.appendingPathComponent(file)
+            if let data = try? Data(contentsOf: fileURL) {
+                return .pixels(data)
+            }
+        }
+        if let symbol = iconMeta.symbolic {
+            return .symbolic(symbol)
+        }
+        return fallback
     }
 
     private func discover() -> [HookPack] {

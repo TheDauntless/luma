@@ -55,6 +55,7 @@ final class MainWindow {
     private var sessionNameLabels: [UUID: Label] = [:]
     private var sessionDeviceLabels: [UUID: Label] = [:]
     private var instrumentRowLabels: [UUID: Label] = [:]
+    private var instrumentRowIconHosts: [UUID: Box] = [:]
     private var selection: SidebarSelection = .notebook
     private var addInstrumentButton: Button!
     private var resumeProcessButton: Button!
@@ -398,7 +399,8 @@ final class MainWindow {
         engine.onInstalledPackagesChanged = { [weak self] packages in self?.renderPackages(packages) }
         engine.customInstruments.observers.append { [weak self] in
             self?.renderCustomInstruments()
-            self?.refreshInstrumentRowTitles()
+            self?.refreshInstrumentRowVisuals()
+            self?.refreshCustomInstrumentDefPane()
         }
         renderCustomInstruments()
         NotificationCenter.default.addObserver(
@@ -719,8 +721,7 @@ final class MainWindow {
             box.marginEnd = 12
             box.marginTop = 6
             box.marginBottom = 6
-            let icon = Gtk.Image(iconName: "applications-utilities-symbolic")
-            box.append(child: icon)
+            box.append(child: InstrumentIconView.makeImage(for: def.icon, pixelSize: 16))
             let label = Label(str: def.name)
             label.halign = .start
             label.hexpand = true
@@ -741,14 +742,32 @@ final class MainWindow {
         }
     }
 
-    private func refreshInstrumentRowTitles() {
+    private func refreshInstrumentRowVisuals() {
         guard let engine else { return }
         for (id, label) in instrumentRowLabels {
-            guard let instrument = instrument(withID: id),
-                let descriptor = engine.descriptor(for: instrument)
-            else { continue }
+            guard let instrument = instrument(withID: id) else { continue }
+            let descriptor = engine.descriptor(for: instrument)
             label.label = descriptor.displayName
+            if let host = instrumentRowIconHosts[id] {
+                replaceIconHostContents(host, with: descriptor.icon)
+            }
         }
+    }
+
+    private func replaceIconHostContents(_ host: Box, with icon: InstrumentIcon) {
+        var child = host.firstChild
+        while let cur = child {
+            child = cur.nextSibling
+            host.remove(child: cur)
+        }
+        host.append(child: InstrumentIconView.makeImage(for: icon, pixelSize: 16))
+    }
+
+    private func refreshCustomInstrumentDefPane() {
+        guard let pane = currentCustomInstrumentDefPane,
+            let updated = engine?.customInstruments.def(withId: pane.def.id)
+        else { return }
+        pane.refresh(def: updated)
     }
 
     private func instrument(withID id: UUID) -> LumaCore.InstrumentInstance? {
@@ -813,58 +832,7 @@ final class MainWindow {
 
     private func presentCustomInstrumentRenameDialog(def: LumaCore.CustomInstrumentDef) {
         guard let engine else { return }
-
-        let column = Box(orientation: .vertical, spacing: 8)
-
-        let nameRow = Box(orientation: .horizontal, spacing: 8)
-        let nameLabel = Label(str: "Name")
-        nameLabel.halign = .start
-        nameLabel.setSizeRequest(width: 100, height: -1)
-        nameRow.append(child: nameLabel)
-        let nameEntry = Entry()
-        nameEntry.text = def.name
-        nameEntry.hexpand = true
-        nameRow.append(child: nameEntry)
-        column.append(child: nameRow)
-
-        let iconRow = Box(orientation: .horizontal, spacing: 8)
-        let iconLabel = Label(str: "Icon (symbolic)")
-        iconLabel.halign = .start
-        iconLabel.setSizeRequest(width: 100, height: -1)
-        iconRow.append(child: iconLabel)
-        let iconEntry = Entry()
-        iconEntry.text = def.iconSystemName
-        iconEntry.hexpand = true
-        iconRow.append(child: iconEntry)
-        column.append(child: iconRow)
-
-        let dialog = Adw.AlertDialog(heading: "Rename Custom Instrument", body: nil)
-        dialog.addResponse(id: "cancel", label: "_Cancel")
-        dialog.addResponse(id: "save", label: "_Save")
-        dialog.setResponseAppearance(response: "save", appearance: .suggested)
-        dialog.setDefault(response: "save")
-        dialog.setClose(response: "cancel")
-        dialog.setExtra(child: column)
-        MonacoEditor.suspendOverlays()
-        dialog.onClosed { _ in
-            MainActor.assumeIsolated {
-                MonacoEditor.resumeOverlays()
-            }
-        }
-        dialog.onResponse { _, responseID in
-            MainActor.assumeIsolated {
-                guard responseID == "save" else { return }
-                var updated = def
-                let proposedName = (nameEntry.text ?? "").trimmingCharacters(in: .whitespaces)
-                updated.name = proposedName.isEmpty ? def.name : proposedName
-                let proposedIcon = (iconEntry.text ?? "").trimmingCharacters(in: .whitespaces)
-                updated.iconSystemName = proposedIcon.isEmpty ? "wand.and.stars" : proposedIcon
-                Task { @MainActor in
-                    await engine.updateCustomInstrument(updated)
-                }
-            }
-        }
-        dialog.present(parent: window)
+        CustomInstrumentRenameDialog(engine: engine, def: def, parentWindow: window).present()
     }
 
     private func buildPackagesSection() -> Box {
@@ -1193,8 +1161,7 @@ final class MainWindow {
 
     private func deleteInstrument(_ instrument: LumaCore.InstrumentInstance) {
         guard let engine else { return }
-        let descriptor = engine.descriptor(for: instrument)
-        let title = descriptor?.displayName ?? "Instrument"
+        let title = engine.descriptor(for: instrument).displayName
         Task { @MainActor in
             await engine.removeInstrument(instrument)
             if case .instrument(_, let id) = self.selection, id == instrument.id {
@@ -1248,7 +1215,7 @@ final class MainWindow {
     private func openAddInstrumentDialog() {
         guard let engine, let sessionID = currentSessionID() else { return }
         let existing = (try? engine.store.fetchInstruments(sessionID: sessionID)) ?? []
-        let disabledDescriptorIDs = Set(existing.compactMap { engine.descriptor(for: $0)?.id })
+        let disabledDescriptorIDs = Set(existing.map { engine.descriptor(for: $0).id })
         let dialog = AddInstrumentDialog(
             parent: window,
             engine: engine,
@@ -1264,8 +1231,7 @@ final class MainWindow {
             } else {
                 self.select(.instrument(sessionID: sessionID, instrumentID: instance.id))
             }
-            let title = engine.descriptor(for: instance)?.displayName ?? "Instrument"
-            self.showToast("Added \(title)")
+            self.showToast("Added \(engine.descriptor(for: instance).displayName)")
         }
         dialog.present()
     }
@@ -1414,6 +1380,7 @@ final class MainWindow {
             sessions.removeAll { $0.id == id }
             for instrument in instrumentsBySession[id] ?? [] {
                 instrumentRowLabels.removeValue(forKey: instrument.id)
+                instrumentRowIconHosts.removeValue(forKey: instrument.id)
             }
             instrumentsBySession.removeValue(forKey: id)
             insightsBySession.removeValue(forKey: id)
@@ -1443,6 +1410,7 @@ final class MainWindow {
         case .instrumentRemoved(let id, let sessionID):
             instrumentsBySession[sessionID]?.removeAll { $0.id == id }
             instrumentRowLabels.removeValue(forKey: id)
+            instrumentRowIconHosts.removeValue(forKey: id)
             removeChildRow(kind: .instrument(sessionID: sessionID, instrumentID: id))
         case .insightAdded(let insight):
             insightsBySession[insight.sessionID, default: []].append(insight)
@@ -1463,7 +1431,7 @@ final class MainWindow {
                 select(.repl(sessionID))
             }
         case .descriptorsChanged, .customInstrumentDefsChanged:
-            break
+            refreshInstrumentRowVisuals()
         }
         sessionsHeaderLabel?.label = "SESSIONS (\(sessions.count))"
         sessionsEmptyHint?.visible = sessions.isEmpty
@@ -1581,25 +1549,21 @@ final class MainWindow {
 
     private func makeInstrumentRow(_ instrument: LumaCore.InstrumentInstance) -> ListBoxRow {
         let row = ListBoxRow()
-        let descriptor = engine?.descriptor(for: instrument)
-        let title = descriptor?.displayName ?? "Instrument"
+        let descriptor = engine!.descriptor(for: instrument)
         let rowBox = Box(orientation: .horizontal, spacing: 6)
         rowBox.halign = .start
         rowBox.marginStart = 28
         rowBox.marginEnd = 12
         rowBox.marginTop = 2
         rowBox.marginBottom = 2
-        if let descriptor {
-            rowBox.append(child: InstrumentIconView.make(for: descriptor))
-        } else {
-            let fallbackIcon = Gtk.Image(iconName: instrumentIconName(for: instrument.kind))
-            fallbackIcon.pixelSize = 16
-            rowBox.append(child: fallbackIcon)
-        }
-        let ilabel = Label(str: title)
+        let iconHost = Box(orientation: .horizontal, spacing: 0)
+        iconHost.append(child: InstrumentIconView.makeImage(for: descriptor.icon, pixelSize: 16))
+        rowBox.append(child: iconHost)
+        let ilabel = Label(str: descriptor.displayName)
         ilabel.halign = .start
         rowBox.append(child: ilabel)
         instrumentRowLabels[instrument.id] = ilabel
+        instrumentRowIconHosts[instrument.id] = iconHost
         if instrument.state == .disabled {
             rowBox.opacity = 0.3
         }
@@ -1692,15 +1656,6 @@ final class MainWindow {
             }
         }
         return avatar
-    }
-
-    private func instrumentIconName(for kind: LumaCore.InstrumentKind) -> String {
-        switch kind {
-        case .tracer: return "media-playlist-consecutive-symbolic"
-        case .hookPack: return "application-x-addon-symbolic"
-        case .codeShare: return "cloud-symbolic"
-        case .custom: return "applications-utilities-symbolic"
-        }
     }
 
     // MARK: - Sidebar context menus
@@ -1881,7 +1836,7 @@ final class MainWindow {
     }
 
     private func confirmDeleteInstrument(_ instrument: LumaCore.InstrumentInstance) {
-        let title = engine?.descriptor(for: instrument)?.displayName ?? "Instrument"
+        let title = engine?.descriptor(for: instrument).displayName ?? "Instrument"
         confirmDestructive(
             message: "Delete instrument “\(title)”?",
             detail: nil,

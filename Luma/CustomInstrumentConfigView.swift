@@ -37,7 +37,7 @@ struct CustomInstrumentConfigView: View {
     private var header: some View {
         HStack(spacing: 8) {
             if let def {
-                Image(systemName: def.iconSystemName)
+                InstrumentIconView(icon: def.icon, pointSize: 14)
                 Text(def.name).font(.headline)
             } else {
                 Text("Custom Instrument").font(.headline)

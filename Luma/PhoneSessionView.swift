@@ -459,16 +459,16 @@ private struct InstrumentRow: View {
     let instance: LumaCore.InstrumentInstance
     @ObservedObject var workspace: Workspace
 
-    private var descriptor: InstrumentDescriptor? {
+    private var descriptor: InstrumentDescriptor {
         workspace.engine.descriptor(for: instance)
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            InstrumentIconView(icon: descriptor?.icon ?? .system("puzzlepiece.extension"), pointSize: 20)
+            InstrumentIconView(icon: descriptor.icon, pointSize: 20)
                 .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(descriptor?.displayName ?? "Instrument")
+                Text(descriptor.displayName)
                     .font(.body)
                 if instance.state == .disabled {
                     Text("Disabled")

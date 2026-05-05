@@ -233,6 +233,27 @@ luma_app_set_open_handler(void *gobject_application,
 
 // --- Image normalization ----------------------------------------------------
 
+static GdkPixbuf *
+load_and_scale(const unsigned char *in_bytes, size_t in_size, int max_dimension)
+{
+    GInputStream *stream = g_memory_input_stream_new_from_data(in_bytes, (gssize)in_size, NULL);
+    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_stream(stream, NULL, NULL);
+    g_object_unref(stream);
+    if (!pixbuf) return NULL;
+
+    int w = gdk_pixbuf_get_width(pixbuf);
+    int h = gdk_pixbuf_get_height(pixbuf);
+    int longest = w > h ? w : h;
+    if (longest <= max_dimension) return pixbuf;
+
+    double scale = (double)max_dimension / (double)longest;
+    int nw = (int)(w * scale);
+    int nh = (int)(h * scale);
+    GdkPixbuf *scaled = gdk_pixbuf_scale_simple(pixbuf, nw, nh, GDK_INTERP_BILINEAR);
+    g_object_unref(pixbuf);
+    return scaled;
+}
+
 bool
 luma_image_normalize(const unsigned char *in_bytes,
                       size_t in_size,
@@ -240,39 +261,37 @@ luma_image_normalize(const unsigned char *in_bytes,
                       unsigned char **out_bytes,
                       size_t *out_size)
 {
-    if (!in_bytes || in_size == 0 || !out_bytes || !out_size) return false;
-
-    GInputStream *stream = g_memory_input_stream_new_from_data(in_bytes, (gssize)in_size, NULL);
-    GError *error = NULL;
-    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_stream(stream, NULL, &error);
-    g_object_unref(stream);
-    if (!pixbuf) {
-        if (error) g_error_free(error);
-        return false;
-    }
-
-    int w = gdk_pixbuf_get_width(pixbuf);
-    int h = gdk_pixbuf_get_height(pixbuf);
-    int longest = w > h ? w : h;
-    GdkPixbuf *scaled = pixbuf;
-    if (longest > max_dimension) {
-        double scale = (double)max_dimension / (double)longest;
-        int nw = (int)(w * scale);
-        int nh = (int)(h * scale);
-        scaled = gdk_pixbuf_scale_simple(pixbuf, nw, nh, GDK_INTERP_BILINEAR);
-        g_object_unref(pixbuf);
-        if (!scaled) return false;
-    }
+    GdkPixbuf *pixbuf = load_and_scale(in_bytes, in_size, max_dimension);
+    if (!pixbuf) return false;
 
     gchar *buf = NULL;
     gsize buf_len = 0;
     gboolean ok = gdk_pixbuf_save_to_buffer(
-        scaled, &buf, &buf_len, "jpeg", &error, "quality", "85", NULL);
-    g_object_unref(scaled);
-    if (!ok) {
-        if (error) g_error_free(error);
-        return false;
-    }
+        pixbuf, &buf, &buf_len, "jpeg", NULL, "quality", "85", NULL);
+    g_object_unref(pixbuf);
+    if (!ok) return false;
+
+    *out_bytes = (unsigned char *)buf;
+    *out_size = (size_t)buf_len;
+    return true;
+}
+
+bool
+luma_image_normalize_to_png(const unsigned char *in_bytes,
+                             size_t in_size,
+                             int max_dimension,
+                             unsigned char **out_bytes,
+                             size_t *out_size)
+{
+    GdkPixbuf *pixbuf = load_and_scale(in_bytes, in_size, max_dimension);
+    if (!pixbuf) return false;
+
+    gchar *buf = NULL;
+    gsize buf_len = 0;
+    gboolean ok = gdk_pixbuf_save_to_buffer(
+        pixbuf, &buf, &buf_len, "png", NULL, NULL);
+    g_object_unref(pixbuf);
+    if (!ok) return false;
 
     *out_bytes = (unsigned char *)buf;
     *out_size = (size_t)buf_len;

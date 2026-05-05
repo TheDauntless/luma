@@ -6,7 +6,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
 
     public var id: UUID
     public var name: String
-    public var iconSystemName: String
+    public var icon: InstrumentIcon
     public var source: String
     public var features: [Feature]
     public var createdAt: Date
@@ -37,7 +37,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public init(
         id: UUID = UUID(),
         name: String,
-        iconSystemName: String = "wand.and.stars",
+        icon: InstrumentIcon = .symbolic(InstrumentIconCatalog.default.id),
         source: String = CustomInstrumentDef.exampleSource,
         features: [Feature] = [],
         createdAt: Date = Date(),
@@ -45,7 +45,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     ) {
         self.id = id
         self.name = name
-        self.iconSystemName = iconSystemName
+        self.icon = icon
         self.source = source
         self.features = features
         self.createdAt = createdAt
@@ -55,7 +55,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public init(row: Row) throws {
         id = UUID(uuidString: row["id"])!
         name = row["name"]
-        iconSystemName = row["icon_system_name"]
+        icon = InstrumentIcon.decodedJSONString(row["icon"])
         source = row["source"]
         let featuresJSON: String = row["features_json"]
         features = try JSONDecoder().decode([Feature].self, from: Data(featuresJSON.utf8))
@@ -66,7 +66,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public func encode(to container: inout PersistenceContainer) {
         container["id"] = id.uuidString
         container["name"] = name
-        container["icon_system_name"] = iconSystemName
+        container["icon"] = icon.encodedJSONString()
         container["source"] = source
         container["features_json"] = featuresJSONString
         container["created_at"] = createdAt
@@ -77,7 +77,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         [
             "id": id.uuidString,
             "name": name,
-            "icon_system_name": iconSystemName,
+            "icon": icon.toJSON(),
             "source": source,
             "features": features.map(featureToJSON),
             "created_at": ISO8601DateFormatter().string(from: createdAt),
@@ -88,7 +88,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public static func fromJSON(_ obj: [String: Any]) -> CustomInstrumentDef? {
         guard let idStr = obj["id"] as? String, let id = UUID(uuidString: idStr),
             let name = obj["name"] as? String,
-            let icon = obj["icon_system_name"] as? String,
+            let icon = InstrumentIcon.fromJSON(obj["icon"]),
             let source = obj["source"] as? String
         else { return nil }
         let features = parseFeatures(obj["features"])
@@ -98,7 +98,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         return CustomInstrumentDef(
             id: id,
             name: name,
-            iconSystemName: icon,
+            icon: icon,
             source: source,
             features: features,
             createdAt: createdAt,

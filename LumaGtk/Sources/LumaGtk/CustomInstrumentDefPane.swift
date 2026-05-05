@@ -13,6 +13,8 @@ final class CustomInstrumentDefPane {
     private var draftSource: String
     private let sourceEditor: MonacoEditor
     private let saveButton: Button
+    private let headerNameLabel: Label
+    private let headerIconHost: Box
 
     init(engine: Engine, def: CustomInstrumentDef, sourceEditor: MonacoEditor) {
         self.engine = engine
@@ -23,19 +25,35 @@ final class CustomInstrumentDefPane {
         widget = Box(orientation: .vertical, spacing: 8)
         widget.hexpand = true
         widget.vexpand = true
-        widget.marginStart = 24
-        widget.marginEnd = 24
         widget.marginTop = 12
-        widget.marginBottom = 12
 
         saveButton = Button(label: "Save")
         saveButton.add(cssClass: "suggested-action")
         saveButton.sensitive = false
+
+        headerNameLabel = Label(str: def.name)
+        headerNameLabel.halign = .start
+        headerNameLabel.add(cssClass: "title-3")
+
+        headerIconHost = Box(orientation: .horizontal, spacing: 0)
+        headerIconHost.append(child: InstrumentIconView.makeImage(for: def.icon, pixelSize: 24))
+
         saveButton.onClicked { [weak self] _ in
             MainActor.assumeIsolated { self?.commit() }
         }
 
         layout()
+    }
+
+    func refresh(def: CustomInstrumentDef) {
+        self.def = def
+        headerNameLabel.label = def.name
+        var child = headerIconHost.firstChild
+        while let cur = child {
+            child = cur.nextSibling
+            headerIconHost.remove(child: cur)
+        }
+        headerIconHost.append(child: InstrumentIconView.makeImage(for: def.icon, pixelSize: 24))
     }
 
     private func layout() {
@@ -45,16 +63,13 @@ final class CustomInstrumentDefPane {
 
     private func header() -> Box {
         let row = Box(orientation: .horizontal, spacing: 8)
-        let icon = Gtk.Image(iconName: "applications-utilities-symbolic")
-        icon.pixelSize = 24
-        row.append(child: icon)
+        row.marginStart = 24
+        row.marginEnd = 24
+        row.append(child: headerIconHost)
 
         let titles = Box(orientation: .vertical, spacing: 0)
         titles.hexpand = true
-        let nameLabel = Label(str: def.name)
-        nameLabel.halign = .start
-        nameLabel.add(cssClass: "title-3")
-        titles.append(child: nameLabel)
+        titles.append(child: headerNameLabel)
         let subtitle = Label(str: "Custom instrument")
         subtitle.halign = .start
         subtitle.add(cssClass: "caption")
@@ -84,10 +99,6 @@ final class CustomInstrumentDefPane {
         return container
     }
 
-    private func isDirty() -> Bool {
-        draftSource != def.source
-    }
-
     private func commit() {
         guard let engine else { return }
         var updated = def
@@ -97,5 +108,9 @@ final class CustomInstrumentDefPane {
             self.def = updated
             self.saveButton.sensitive = false
         }
+    }
+
+    private func isDirty() -> Bool {
+        draftSource != def.source
     }
 }

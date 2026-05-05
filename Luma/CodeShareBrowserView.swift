@@ -379,7 +379,7 @@ struct CodeShareProjectDetailView: View {
             kind: .codeShare,
             sourceIdentifier: sourceIdentifier,
             displayName: cfg.name,
-            icon: .system("cloud"),
+            icon: .symbolic("cloud"),
             makeInitialConfigJSON: { configData }
         )
 

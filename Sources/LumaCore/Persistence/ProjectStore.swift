@@ -722,7 +722,7 @@ public final class ProjectStore: Sendable {
         try db.create(table: "custom_instrument_def", ifNotExists: true) { t in
             t.primaryKey("id", .text).notNull()
             t.column("name", .text).notNull()
-            t.column("icon_system_name", .text).notNull()
+            t.column("icon", .text).notNull()
             t.column("source", .text).notNull()
             t.column("features_json", .text).notNull().defaults(to: "[]")
             t.column("created_at", .datetime).notNull()

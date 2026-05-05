@@ -1,6 +1,7 @@
 import Frida
 import LumaCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 private let subrowIconWidth: CGFloat = 16
 
@@ -338,19 +339,15 @@ private struct SidebarInstrumentRow: View {
 
     @State private var isShowingDeleteConfirm = false
 
-    private var descriptor: InstrumentDescriptor? {
+    private var descriptor: InstrumentDescriptor {
         workspace.engine.descriptor(for: instance)
-    }
-
-    private var displayName: String {
-        descriptor?.displayName ?? "Instrument"
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            InstrumentIconView(icon: descriptor?.icon ?? .system("puzzlepiece.extension"), pointSize: 12)
+            InstrumentIconView(icon: descriptor.icon, pointSize: 12)
                 .frame(width: subrowIconWidth, alignment: .center)
-            Text(displayName)
+            Text(descriptor.displayName)
             Spacer()
         }
         .font(.callout)
@@ -366,8 +363,8 @@ private struct SidebarInstrumentRow: View {
             } label: {
                 Label(
                     instance.state == .enabled
-                        ? "Disable \"\(displayName)\""
-                        : "Enable \"\(displayName)\"",
+                        ? "Disable \"\(descriptor.displayName)\""
+                        : "Enable \"\(descriptor.displayName)\"",
                     systemImage: instance.state == .enabled ? "pause.circle" : "play.circle"
                 )
             }
@@ -390,7 +387,7 @@ private struct SidebarInstrumentRow: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will remove \"\(displayName)\" from this session.")
+            Text("This will remove \"\(descriptor.displayName)\" from this session.")
         }
     }
 
@@ -487,7 +484,7 @@ struct SidebarCustomInstrumentDefRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: def.iconSystemName)
+            InstrumentIconView(icon: def.icon, pointSize: 14)
                 .foregroundStyle(.tint)
             Text(def.name)
             Spacer()
@@ -549,26 +546,8 @@ struct CustomInstrumentRenamePopover: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftName: String = ""
-    @State private var draftIcon: String = ""
-
-    static let iconChoices: [String] = [
-        "wand.and.stars",
-        "puzzlepiece.extension",
-        "ant",
-        "magnifyingglass",
-        "gauge.with.dots.needle.50percent",
-        "antenna.radiowaves.left.and.right",
-        "shield",
-        "bolt",
-        "key",
-        "lock",
-        "network",
-        "cpu",
-        "memorychip",
-        "doc.text.magnifyingglass",
-        "pin",
-        "scope",
-    ]
+    @State private var draftIcon: InstrumentIcon = .symbolic(InstrumentIconCatalog.default.id)
+    @State private var isPickingFile = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -577,21 +556,8 @@ struct CustomInstrumentRenamePopover: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("customInstrument.rename.name")
             Text("Icon").font(.subheadline)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(28)), count: 8), spacing: 6) {
-                ForEach(Self.iconChoices, id: \.self) { name in
-                    Button {
-                        draftIcon = name
-                    } label: {
-                        Image(systemName: name)
-                            .frame(width: 24, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(draftIcon == name ? Color.accentColor.opacity(0.25) : .clear)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            iconGrid
+            customBitmapRow
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -601,17 +567,75 @@ struct CustomInstrumentRenamePopover: View {
             }
         }
         .padding(12)
-        .frame(width: 320)
+        .frame(width: 360)
         .onAppear {
             draftName = def.name
-            draftIcon = def.iconSystemName
+            draftIcon = def.icon
         }
+        .fileImporter(
+            isPresented: $isPickingFile,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            if case let .success(urls) = result, let url = urls.first {
+                loadIcon(from: url)
+            }
+        }
+    }
+
+    private var iconGrid: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(32)), count: 8), spacing: 8) {
+            ForEach(InstrumentIconCatalog.userPickable, id: \.id) { concept in
+                Button {
+                    draftIcon = .symbolic(concept.id)
+                } label: {
+                    Image(systemName: concept.sfSymbol)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(isConceptSelected(concept) ? Color.accentColor.opacity(0.25) : .clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(concept.displayName)
+            }
+        }
+    }
+
+    private var customBitmapRow: some View {
+        HStack(spacing: 10) {
+            Group {
+                if case .pixels = draftIcon {
+                    InstrumentIconView(icon: draftIcon, pointSize: 32)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.25)))
+                } else {
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [2]))
+                        .frame(width: 32, height: 32)
+                }
+            }
+            Button("Choose File\u{2026}") { isPickingFile = true }
+        }
+    }
+
+    private func isConceptSelected(_ c: InstrumentIconConcept) -> Bool {
+        if case .symbolic(let id) = draftIcon, id == c.id { return true }
+        return false
+    }
+
+    private func loadIcon(from url: URL) {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        guard let raw = try? Data(contentsOf: url) else { return }
+        guard let normalized = InstrumentIconRasterizer.normalize(raw) else { return }
+        draftIcon = .pixels(normalized)
     }
 
     private func commit() {
         var updated = def
         updated.name = draftName.trimmingCharacters(in: .whitespaces)
-        updated.iconSystemName = draftIcon
+        updated.icon = draftIcon
         Task { @MainActor in
             await workspace.engine.updateCustomInstrument(updated)
             dismiss()

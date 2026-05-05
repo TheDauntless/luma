@@ -28,9 +28,9 @@ struct CustomInstrumentEditorView: View {
 
     @ViewBuilder
     private func content(def: CustomInstrumentDef) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             header(def: def)
-            Divider()
+                .padding(.horizontal, 16)
             CodeEditorView(
                 text: $draftSource,
                 profile: EditorProfile.fridaCustomInstrument(
@@ -42,7 +42,7 @@ struct CustomInstrumentEditorView: View {
             )
             .accessibilityIdentifier("customInstrument.editor")
         }
-        .padding(.top, 4)
+        .padding(.top, 8)
         .onAppear { syncFromDef(def) }
         .onChange(of: defID) { _, _ in
             if let d = self.def { syncFromDef(d) }
@@ -52,8 +52,7 @@ struct CustomInstrumentEditorView: View {
 
     private func header(def: CustomInstrumentDef) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: def.iconSystemName)
-                .font(.system(size: 18))
+            InstrumentIconView(icon: def.icon, pointSize: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(def.name).font(.headline)
                 Text("Custom instrument")

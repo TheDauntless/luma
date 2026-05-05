@@ -79,6 +79,12 @@ bool luma_image_normalize(const unsigned char *in_bytes,
                            unsigned char **out_bytes,
                            size_t *out_size);
 
+bool luma_image_normalize_to_png(const unsigned char *in_bytes,
+                                  size_t in_size,
+                                  int max_dimension,
+                                  unsigned char **out_bytes,
+                                  size_t *out_size);
+
 #ifdef __cplusplus
 }
 #endif

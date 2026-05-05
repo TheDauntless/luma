@@ -2,11 +2,11 @@ import Foundation
 
 public struct HookPackManifest: Decodable, Sendable {
     public struct Icon: Decodable, Sendable {
-        public var systemName: String?
+        public var symbolic: String?
         public var file: String?
 
-        public init(systemName: String? = nil, file: String? = nil) {
-            self.systemName = systemName
+        public init(symbolic: String? = nil, file: String? = nil) {
+            self.symbolic = symbolic
             self.file = file
         }
     }

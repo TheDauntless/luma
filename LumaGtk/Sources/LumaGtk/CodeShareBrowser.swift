@@ -412,7 +412,7 @@ final class CodeShareBrowser {
             kind: .codeShare,
             sourceIdentifier: sourceIdentifier,
             displayName: config.name,
-            icon: .system("cloud"),
+            icon: .symbolic("cloud"),
             makeInitialConfigJSON: { configData }
         )
         engine.registerDescriptor(descriptor)

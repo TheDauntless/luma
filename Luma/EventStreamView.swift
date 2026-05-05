@@ -502,10 +502,8 @@ struct EventStreamView: View {
             return String(describing: evt.payload)
 
         case .instrument:
-            if let instrument = workspace.instrument(for: evt),
-                let descriptor = workspace.engine.descriptor(for: instrument)
-            {
-                return descriptor.summarizeEvent(evt)
+            if let instrument = workspace.instrument(for: evt) {
+                return workspace.engine.descriptor(for: instrument).summarizeEvent(evt)
             }
             return String(describing: evt.payload)
 
@@ -861,7 +859,7 @@ private struct EventSourceBadge: View {
             return "\(processName) • REPL"
 
         case .instrument:
-            let name = workspace.instrument(for: evt).flatMap { workspace.engine.descriptor(for: $0)?.displayName } ?? "Instrument"
+            let name = workspace.instrument(for: evt).map { workspace.engine.descriptor(for: $0).displayName } ?? "Instrument"
             return "\(name) • \(processName)"
         }
     }
