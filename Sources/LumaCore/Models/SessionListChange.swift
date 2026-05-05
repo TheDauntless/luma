@@ -11,4 +11,6 @@ public enum SessionListChange: Sendable {
     case insightRemoved(id: UUID, sessionID: UUID)
     case captureAdded(ITraceCaptureRecord)
     case captureRemoved(id: UUID, sessionID: UUID)
+    case descriptorsChanged
+    case customInstrumentDefsChanged
 }

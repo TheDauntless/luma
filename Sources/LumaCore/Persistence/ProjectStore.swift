@@ -486,6 +486,98 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    // MARK: - Custom Instrument Definitions
+
+    public func observeCustomInstrumentDefs(
+        onChange: @escaping @Sendable ([CustomInstrumentDef]) -> Void
+    ) -> StoreObservation {
+        StoreObservation(
+            ValueObservation
+                .tracking { db in
+                    try CustomInstrumentDef
+                        .order(Column("created_at").asc)
+                        .fetchAll(db)
+                }
+                .start(in: db, scheduling: .async(onQueue: .main), onError: { _ in }, onChange: onChange)
+        )
+    }
+
+    public func fetchCustomInstrumentDefs() throws -> [CustomInstrumentDef] {
+        try db.read { db in
+            try CustomInstrumentDef
+                .order(Column("created_at").asc)
+                .fetchAll(db)
+        }
+    }
+
+    public func fetchCustomInstrumentDef(id: UUID) throws -> CustomInstrumentDef? {
+        try db.read { db in
+            try CustomInstrumentDef
+                .filter(Column("id") == id.uuidString)
+                .fetchOne(db)
+        }
+    }
+
+    public func save(_ def: CustomInstrumentDef) throws {
+        try db.write { db in
+            try def.save(db)
+        }
+    }
+
+    public func deleteCustomInstrumentDef(id: UUID) throws {
+        try db.write { db in
+            _ = try CustomInstrumentDef
+                .filter(Column("id") == id.uuidString)
+                .deleteAll(db)
+        }
+    }
+
+    // MARK: - Custom Instrument Outbox
+
+    public func saveCustomInstrumentOutboxOp(_ op: CustomInstrumentOp) throws {
+        try db.write { db in
+            try saveCustomInstrumentOutboxOp(op, in: db)
+        }
+    }
+
+    public func fetchCustomInstrumentOutboxOps() throws -> [CustomInstrumentOp] {
+        try db.read { db in
+            let rows = try CustomInstrumentOutboxRecord
+                .order(Column("created_at").asc, Column("op_id").asc)
+                .fetchAll(db)
+            return rows.compactMap { $0.toOp() }
+        }
+    }
+
+    public func removeCustomInstrumentOutboxOp(opID: UUID) throws {
+        try db.write { db in
+            _ = try CustomInstrumentOutboxRecord.deleteOne(db, key: opID.uuidString)
+        }
+    }
+
+    public func clearCustomInstrumentOutbox() throws {
+        try db.write { db in
+            _ = try CustomInstrumentOutboxRecord.deleteAll(db)
+        }
+    }
+
+    private func saveCustomInstrumentOutboxOp(_ op: CustomInstrumentOp, in db: Database) throws {
+        let payload = op.toJSON()
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.sortedKeys]
+        )
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        let record = CustomInstrumentOutboxRecord(
+            opID: op.opID.uuidString,
+            kind: op.kind,
+            defID: op.defID.uuidString,
+            payloadJSON: json,
+            createdAt: Date()
+        )
+        try record.save(db)
+    }
+
     // MARK: - Target Picker State
 
     public func fetchTargetPickerState() throws -> TargetPickerState {
@@ -625,6 +717,24 @@ public final class ProjectStore: Sendable {
         try db.create(table: "project_collaboration_state", ifNotExists: true) { t in
             t.primaryKey("id", .text).notNull()
             t.column("lab_id", .text)
+        }
+
+        try db.create(table: "custom_instrument_def", ifNotExists: true) { t in
+            t.primaryKey("id", .text).notNull()
+            t.column("name", .text).notNull()
+            t.column("icon_system_name", .text).notNull()
+            t.column("source", .text).notNull()
+            t.column("features_json", .text).notNull().defaults(to: "[]")
+            t.column("created_at", .datetime).notNull()
+            t.column("updated_at", .datetime).notNull()
+        }
+
+        try db.create(table: "custom_instrument_outbox", ifNotExists: true) { t in
+            t.primaryKey("op_id", .text).notNull()
+            t.column("kind", .text).notNull()
+            t.column("def_id", .text).notNull()
+            t.column("payload_json", .text).notNull()
+            t.column("created_at", .datetime).notNull()
         }
 
         try db.create(table: "target_picker_state", ifNotExists: true) { t in

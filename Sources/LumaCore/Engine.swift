@@ -22,6 +22,7 @@ public final class Engine {
     private var eventLogTask: Task<Void, Never>?
 
     public let hookPacks: HookPackLibrary
+    public let customInstruments: CustomInstrumentLibrary
 
     @ObservationIgnored private var disassemblers: [UUID: Disassembler] = [:]
 
@@ -66,6 +67,7 @@ public final class Engine {
         let hookPacksDir = dataDirectory.appendingPathComponent("HookPacks", isDirectory: true)
         try? FileManager.default.createDirectory(at: hookPacksDir, withIntermediateDirectories: true)
         self.hookPacks = HookPackLibrary(directory: hookPacksDir)
+        self.customInstruments = CustomInstrumentLibrary()
         self.collaboration = CollaborationSession(
             deviceManager: deviceManager,
             store: store,
@@ -84,6 +86,13 @@ public final class Engine {
         registerDescriptor(Self.tracerDescriptor)
         for desc in hookPacks.descriptors() {
             registerDescriptor(desc)
+        }
+        customInstruments.start(store: store)
+        for desc in customInstruments.descriptors() {
+            registerDescriptor(desc)
+        }
+        customInstruments.observers.append { [weak self] in
+            self?.refreshCustomInstrumentDescriptors()
         }
         bindCollaborationCallbacks()
 
@@ -231,6 +240,43 @@ public final class Engine {
     public func bindCollaborationCallbacks() {
         collaboration.onAuthRejected = { [weak self] _ in
             await self?.gitHubAuth.signOut()
+        }
+
+        collaboration.onCustomInstrumentOpReceived = { [weak self] op in
+            guard let self else { return }
+            switch op {
+            case .upsert(let u):
+                var normalized = u.def
+                normalized.normalize()
+                try? self.store.save(normalized)
+                Task { @MainActor in
+                    await self.reloadCustomInstrumentInstances(def: normalized)
+                }
+            case .remove(let r):
+                try? self.store.deleteCustomInstrumentDef(id: r.defID)
+            }
+        }
+
+        collaboration.onCustomInstrumentSnapshot = { [weak self] defs in
+            guard let self else { return }
+            let serverIDs = Set(defs.map(\.id))
+            let local = (try? self.store.fetchCustomInstrumentDefs()) ?? []
+            for stale in local where !serverIDs.contains(stale.id) {
+                try? self.store.deleteCustomInstrumentDef(id: stale.id)
+            }
+            let normalized = defs.map { def -> CustomInstrumentDef in
+                var copy = def
+                copy.normalize()
+                return copy
+            }
+            for def in normalized {
+                try? self.store.save(def)
+            }
+            Task { @MainActor in
+                for def in normalized {
+                    await self.reloadCustomInstrumentInstances(def: def)
+                }
+            }
         }
 
         collaboration.onNotebookSnapshot = { [weak self] entries in
@@ -923,7 +969,20 @@ public final class Engine {
         case .codeShare:
             return descriptorsByID["codeshare:\(instance.sourceIdentifier)"]
                 ?? makeCodeShareDescriptor(for: instance)
+        case .custom:
+            return descriptorsByID["custom:\(instance.sourceIdentifier)"]
         }
+    }
+
+    private func refreshCustomInstrumentDescriptors() {
+        descriptors.removeAll { $0.kind == .custom }
+        for key in descriptorsByID.keys where key.hasPrefix("custom:") {
+            descriptorsByID.removeValue(forKey: key)
+        }
+        for desc in customInstruments.descriptors() {
+            registerDescriptor(desc)
+        }
+        onSessionListChanged?(.descriptorsChanged)
     }
 
     private func makeCodeShareDescriptor(for instance: InstrumentInstance) -> InstrumentDescriptor? {
@@ -1596,6 +1655,12 @@ public final class Engine {
 
         case .codeShare:
             configObject = (try? JSONSerialization.jsonObject(with: configJSON, options: []) as? JSONObject) ?? [:]
+
+        case .custom:
+            let cfg = (try? CustomInstrumentConfig.decode(from: configJSON))
+                ?? CustomInstrumentConfig(defID: UUID(uuidString: inst.sourceIdentifier) ?? UUID())
+            guard let def = customInstrumentDef(for: cfg) else { return }
+            configObject = cfg.toAgentJSON(def: def)
         }
 
         do {
@@ -1646,6 +1711,17 @@ public final class Engine {
                     instanceID: instanceID,
                     config: cfg,
                     configJSON: configJSON,
+                    on: node
+                )
+
+            case .custom:
+                let cfg = (try? CustomInstrumentConfig.decode(from: configJSON))
+                    ?? CustomInstrumentConfig(defID: UUID(uuidString: sourceIdentifier) ?? UUID())
+                guard let def = customInstrumentDef(for: cfg) else { return }
+                try await loadCustomInstrument(
+                    instanceID: instanceID,
+                    def: def,
+                    config: cfg,
                     on: node
                 )
             }
@@ -1925,6 +2001,185 @@ public final class Engine {
             source: entrySource,
             config: config.toJSON()
         )
+    }
+
+    public func loadCustomInstrument(
+        instanceID: UUID,
+        def: CustomInstrumentDef,
+        config: CustomInstrumentConfig,
+        on node: ProcessNode
+    ) async throws {
+        let paths = try compilerWorkspacePaths()
+        let compiledSource = try await compileCustomInstrumentSource(
+            defID: def.id,
+            tsSource: def.source,
+            paths: paths
+        )
+
+        let digest = SHA256.hash(data: Data(compiledSource.utf8))
+        let hashHex = digest.map { String(format: "%02x", $0) }.joined()
+        let moduleName = "/custom/\(def.id.uuidString)/\(hashHex).js"
+
+        try await node.loadInstrumentOnAgent(
+            instanceID: instanceID,
+            moduleName: moduleName,
+            source: compiledSource,
+            config: config.toAgentJSON(def: def)
+        )
+    }
+
+    private func compileCustomInstrumentSource(
+        defID: UUID,
+        tsSource: String,
+        paths: CompilerWorkspacePaths
+    ) async throws -> String {
+        _ = try await compilerWorkspace.ensureReady(paths: paths)
+
+        let fm = FileManager.default
+        let dirRelPath = "CustomInstruments"
+        let dirURL = paths.root.appendingPathComponent(dirRelPath, isDirectory: true)
+        if !fm.fileExists(atPath: dirURL.path) {
+            try fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        }
+
+        let moduleRelPath = "\(dirRelPath)/\(defID.uuidString).ts"
+        let moduleURL = paths.root.appendingPathComponent(moduleRelPath)
+        try tsSource.write(to: moduleURL, atomically: true, encoding: .utf8)
+
+        let options = BuildOptions()
+        options.projectRoot = paths.root.path
+        options.typeCheck = .none
+        options.sourceMaps = .omitted
+        options.compression = .terser
+
+        let bundle = try await compilerWorkspace.withCompilerDiagnostics(label: "custom instrument \(defID.uuidString)") { compiler in
+            try await compiler.build(entrypoint: moduleRelPath, options: options)
+        }
+
+        let modules = try ESMBundleParser.parse(bundle)
+        return modules.modules[modules.order[0]]!
+    }
+
+    private func customInstrumentDef(for config: CustomInstrumentConfig) -> CustomInstrumentDef? {
+        if let cached = customInstruments.def(withId: config.defID) {
+            return cached
+        }
+        return try? store.fetchCustomInstrumentDef(id: config.defID)
+    }
+
+    // MARK: - Custom Instrument Library API
+
+    @discardableResult
+    public func createCustomInstrument(
+        name: String = "Custom Instrument",
+        iconSystemName: String = "wand.and.stars",
+        source: String = CustomInstrumentDef.exampleSource
+    ) -> CustomInstrumentDef {
+        let now = Date()
+        let def = CustomInstrumentDef(
+            name: uniquedCustomInstrumentName(name),
+            iconSystemName: iconSystemName,
+            source: source,
+            features: [],
+            createdAt: now,
+            updatedAt: now
+        )
+        try? store.save(def)
+        broadcastCustomInstrumentUpsert(def)
+        onSessionListChanged?(.customInstrumentDefsChanged)
+        return def
+    }
+
+    public func updateCustomInstrument(_ def: CustomInstrumentDef) async {
+        var updated = def
+        updated.normalize()
+        updated.updatedAt = Date()
+        try? store.save(updated)
+        broadcastCustomInstrumentUpsert(updated)
+        onSessionListChanged?(.customInstrumentDefsChanged)
+        await reloadCustomInstrumentInstances(def: updated)
+    }
+
+    public func deleteCustomInstrument(_ defID: UUID) async {
+        let key = defID.uuidString
+        let doomedInstances = instrumentsBySession.values
+            .flatMap { $0 }
+            .filter { $0.kind == .custom && $0.sourceIdentifier == key }
+        for instance in doomedInstances {
+            await removeInstrument(instance)
+        }
+        try? store.deleteCustomInstrumentDef(id: defID)
+        broadcastCustomInstrumentRemove(defID: defID)
+        onSessionListChanged?(.customInstrumentDefsChanged)
+    }
+
+    private func uniquedCustomInstrumentName(_ proposed: String) -> String {
+        let existing = Set(customInstruments.defs.map(\.name))
+        if !existing.contains(proposed) { return proposed }
+        var n = 2
+        while existing.contains("\(proposed) \(n)") { n += 1 }
+        return "\(proposed) \(n)"
+    }
+
+    private func reloadCustomInstrumentInstances(def: CustomInstrumentDef) async {
+        let key = def.id.uuidString
+        for (sessionID, instances) in instrumentsBySession {
+            for inst in instances where inst.kind == .custom && inst.sourceIdentifier == key {
+                guard let node = node(forSessionID: sessionID) else { continue }
+                guard node.instruments.first(where: { $0.id == inst.id })?.attachment == .attached else { continue }
+                let originalCfg = (try? CustomInstrumentConfig.decode(from: inst.configJSON))
+                    ?? CustomInstrumentConfig(defID: def.id)
+                let cfg = originalCfg.normalized(against: def)
+                let liveInstance = persistNormalizedConfigIfChanged(
+                    instance: inst,
+                    originalConfig: originalCfg,
+                    normalizedConfig: cfg
+                )
+                do {
+                    try await node.disposeInstrumentOnAgent(instanceID: liveInstance.id)
+                } catch {
+                    print("[Engine] Failed to dispose custom instance \(liveInstance.id): \(error)")
+                }
+                do {
+                    try await loadCustomInstrument(
+                        instanceID: liveInstance.id,
+                        def: def,
+                        config: cfg,
+                        on: node
+                    )
+                    node.markInstrumentAttached(id: liveInstance.id)
+                } catch {
+                    print("[Engine] Failed to reload custom instance \(liveInstance.id): \(error)")
+                }
+            }
+        }
+    }
+
+    private func persistNormalizedConfigIfChanged(
+        instance: InstrumentInstance,
+        originalConfig: CustomInstrumentConfig,
+        normalizedConfig: CustomInstrumentConfig
+    ) -> InstrumentInstance {
+        guard normalizedConfig != originalConfig else { return instance }
+        var updated = instance
+        updated.configJSON = normalizedConfig.encode()
+        try? store.save(updated)
+        node(forSessionID: updated.sessionID)?.updateInstrumentConfig(id: updated.id, configJSON: updated.configJSON)
+        onSessionListChanged?(.instrumentUpdated(updated))
+        broadcastInstrumentUpdate(updated)
+        return updated
+    }
+
+    private func broadcastCustomInstrumentUpsert(_ def: CustomInstrumentDef) {
+        let op = CustomInstrumentOp.upsert(.init(def: def))
+        try? store.saveCustomInstrumentOutboxOp(op)
+        collaboration.sendCustomInstrumentOpIfJoined(op)
+    }
+
+    private func broadcastCustomInstrumentRemove(defID: UUID) {
+        let op = CustomInstrumentOp.remove(.init(defID: defID))
+        try? store.saveCustomInstrumentOutboxOp(op)
+        collaboration.sendCustomInstrumentOpIfJoined(op)
     }
 
     public func loadCodeShareInstrument(

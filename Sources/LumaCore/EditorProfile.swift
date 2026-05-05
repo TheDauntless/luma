@@ -195,6 +195,147 @@ extension EditorProfile {
         }
         return profile
     }
+
+    /// Profile for the custom-instrument editor: TypeScript with Frida
+    /// defaults, the gum typings, the custom-instrument ambient
+    /// declarations (so `Instrument`, `InstrumentContext`, etc. are in
+    /// scope), and any global package alias typings.
+    public static func fridaCustomInstrument(
+        packages: [InstalledPackage],
+        def: CustomInstrumentDef? = nil,
+        theme: EditorTheme = .dark,
+        fontSize: Int = 13
+    ) -> EditorProfile {
+        var profile = EditorProfile(
+            languageId: "typescript",
+            theme: theme,
+            fontSize: fontSize,
+            tsCompilerOptions: fridaCompilerOptions
+        )
+        if let gum = fridaGumLib {
+            profile.tsExtraLibs.append(gum)
+        }
+        profile.tsExtraLibs.append(CustomInstrumentTypings.ambientLib)
+        if let def, let featureMap = CustomInstrumentTypings.featureMapLib(for: def) {
+            profile.tsExtraLibs.append(featureMap)
+        }
+        if let aliases = MonacoPackageAliasTypings.makeLib(packages: packages) {
+            profile.tsExtraLibs.append(
+                EditorExtraLib(content: aliases.content, filePath: aliases.filePath)
+            )
+        }
+        return profile
+    }
+}
+
+public enum CustomInstrumentTypings {
+    public static let ambientDeclarations = #"""
+        declare interface CustomInstrumentContext {
+            emit(value: unknown): void;
+        }
+
+        declare type CustomFeatureValue = boolean | number | string | CustomFeatureValue[] | { [name: string]: CustomFeatureValue };
+
+        declare interface CustomInstrumentFeatureMap {
+        }
+
+        declare interface CustomInstrumentConfig {
+            features: CustomInstrumentFeatureMap;
+        }
+
+        declare interface CustomInstrumentHandle {
+            updateConfig?(config: CustomInstrumentConfig): void | Promise<void>;
+            dispose?(): void | Promise<void>;
+        }
+
+        declare interface CustomInstrument {
+            create(
+                ctx: CustomInstrumentContext,
+                config: CustomInstrumentConfig,
+            ): CustomInstrumentHandle | Promise<CustomInstrumentHandle>;
+        }
+        """#
+
+    public static let ambientLib = EditorExtraLib(
+        content: ambientDeclarations,
+        filePath: "@types/frida-luma/custom-instrument.d.ts"
+    )
+
+    public static func featureMapLib(for def: CustomInstrumentDef) -> EditorExtraLib? {
+        guard !def.features.isEmpty else { return nil }
+        return EditorExtraLib(
+            content: featureMapDeclarations(for: def),
+            filePath: "@types/frida-luma/custom-instrument-\(def.id.uuidString).d.ts"
+        )
+    }
+
+    public static func featureMapDeclarations(for def: CustomInstrumentDef) -> String {
+        var lines: [String] = ["declare interface CustomInstrumentFeatureMap {"]
+        for feature in def.features {
+            let optionalMark = feature.optional ? "?" : ""
+            lines.append("    \(featureKey(feature.id))\(optionalMark): \(typeScriptType(for: feature.schema, optional: feature.optional));")
+        }
+        lines.append("}")
+        return lines.joined(separator: "\n")
+    }
+
+    private static func featureKey(_ id: String) -> String {
+        isValidJSIdentifier(id) ? id : jsStringLiteral(id)
+    }
+
+    private static func isValidJSIdentifier(_ s: String) -> Bool {
+        guard let first = s.first else { return false }
+        guard first.isLetter || first == "_" || first == "$" else { return false }
+        for c in s.dropFirst() {
+            guard c.isLetter || c.isNumber || c == "_" || c == "$" else { return false }
+        }
+        return true
+    }
+
+    private static func typeScriptType(for schema: FeatureSchema, optional: Bool) -> String {
+        switch schema {
+        case .boolean: return optional ? "true" : "boolean"
+        case .int, .uint, .double: return "number"
+        case .string, .regex: return "string"
+        case .combo(let choices, _):
+            return comboType(choices: choices)
+        case .object(let fields):
+            return objectType(fields: fields)
+        case .array(let item, _):
+            return "(\(typeScriptArrayItemType(for: item)))[]"
+        }
+    }
+
+    private static func typeScriptArrayItemType(for item: ArrayItemSchema) -> String {
+        switch item {
+        case .boolean: return "boolean"
+        case .int, .uint, .double: return "number"
+        case .string, .regex: return "string"
+        case .combo(let choices): return comboType(choices: choices)
+        case .object(let fields): return objectType(fields: fields)
+        }
+    }
+
+    private static func objectType(fields: [ObjectField]) -> String {
+        guard !fields.isEmpty else { return "{}" }
+        let entries = fields.map { field in
+            let optionalMark = field.optional ? "?" : ""
+            return "\(featureKey(field.name))\(optionalMark): \(typeScriptType(for: field.schema, optional: field.optional))"
+        }
+        return "{ \(entries.joined(separator: "; ")) }"
+    }
+
+    private static func comboType(choices: [String]) -> String {
+        guard !choices.isEmpty else { return "string" }
+        return choices.map(jsStringLiteral).joined(separator: " | ")
+    }
+
+    private static func jsStringLiteral(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
 }
 
 /// Ambient TypeScript declarations injected into tracer hook editors so

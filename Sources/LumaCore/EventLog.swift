@@ -5,6 +5,7 @@ import Observation
 public final class EventLog {
     public private(set) var events: [RuntimeEvent] = []
     public private(set) var totalReceived: Int = 0
+    public private(set) var flushVersion: Int = 0
 
     public let maxVisible: Int
     public let maxInMemory: Int
@@ -35,6 +36,7 @@ public final class EventLog {
         allEvents.removeAll()
         events.removeAll()
         totalReceived = 0
+        flushVersion = 0
         lastFlushedCount = 0
         isFlushScheduled = false
         onEventsCleared?()
@@ -57,6 +59,7 @@ public final class EventLog {
         let prevCount = lastFlushedCount
         events = visible
         lastFlushedCount = newCount
+        flushVersion &+= 1
         if newCount > prevCount {
             onEventsAppended?(visible[prevCount...])
         }

@@ -272,6 +272,8 @@ public final class CollaborationSession {
     public var onSessionEventReceived: ((UUID, RuntimeEvent) -> Void)?
     public var onReplEvalTimedOut: ((UUID) -> Void)?
     public var onSessionRemoved: ((UUID) -> Void)?
+    public var onCustomInstrumentOpReceived: ((CustomInstrumentOp) -> Void)?
+    public var onCustomInstrumentSnapshot: (([CustomInstrumentDef]) -> Void)?
     public var onSessionOpRejected: ((UUID, String) -> Void)?
     public var onChatMessageReceived: ((ChatMessage) -> Void)?
     public var onAuthRejected: ((AuthFailure) async -> Void)?
@@ -431,6 +433,16 @@ public final class CollaborationSession {
         sendOpIfJoined(op)
     }
 
+    public func sendCustomInstrumentOpIfJoined(_ op: CustomInstrumentOp) {
+        guard isCollaborative else { return }
+        guard case .joined(let labID) = status else { return }
+        sendNotification(
+            to: "/labs/\(labID)/custom-instruments",
+            type: "+op",
+            payload: op.toJSON()
+        )
+    }
+
     public func enqueueReorder(entryID: UUID, position: Double) {
         guard isCollaborative else { return }
         let op = NotebookOp.reorder(.init(entryID: entryID, position: position))
@@ -450,6 +462,14 @@ public final class CollaborationSession {
         let sessionOps = (try? store.fetchSessionOutboxOps()) ?? []
         for op in sessionOps {
             sendSessionOpOverWire(op, labID: labID)
+        }
+        let customOps = (try? store.fetchCustomInstrumentOutboxOps()) ?? []
+        for op in customOps {
+            sendNotification(
+                to: "/labs/\(labID)/custom-instruments",
+                type: "+op",
+                payload: op.toJSON()
+            )
         }
     }
 
@@ -1111,6 +1131,10 @@ public final class CollaborationSession {
         let sessionDicts = (payload["sessions"] as? [JSONObject]) ?? []
         let sessions = sessionDicts.compactMap(Session.fromJSON)
         onSessionsSnapshot?(sessions)
+
+        let customDicts = (payload["custom_instruments"] as? [JSONObject]) ?? []
+        let customDefs = customDicts.compactMap(CustomInstrumentDef.fromJSON)
+        onCustomInstrumentSnapshot?(customDefs)
     }
 
     private var lastMessageData: [UInt8]? = nil
@@ -1279,6 +1303,16 @@ public final class CollaborationSession {
             let reason = (payload["reason"] as? String) ?? "rejected"
             try? store.removeOutboxOp(opID: opID)
             onOpRejected?(opID, reason)
+
+        case ("+op", let s) where s.count == 3 && s[0] == "labs" && s[2] == "custom-instruments":
+            guard let op = CustomInstrumentOp.fromJSON(payload) else { return }
+            onCustomInstrumentOpReceived?(op)
+            try? store.removeCustomInstrumentOutboxOp(opID: op.opID)
+
+        case ("+op-rejected", let s) where s.count == 3 && s[0] == "labs" && s[2] == "custom-instruments":
+            guard let idStr = payload["op_id"] as? String,
+                let opID = UUID(uuidString: idStr) else { return }
+            try? store.removeCustomInstrumentOutboxOp(opID: opID)
 
         case ("+op", let s) where s.count == 4 && s[0] == "labs" && s[2] == "sessions":
             guard let sessionID = UUID(uuidString: s[3]) else { return }
