@@ -140,7 +140,7 @@ private struct JSInspectNodeView: View {
             label: {
                 disclosureLabel(
                     typeText: "Object{\(props.count)}\(anchorSuffix())",
-                    preview: inlinePreview(value)
+                    preview: isExpanded ? nil : inlinePreview(value)
                 )
             }
         )
@@ -191,7 +191,7 @@ private struct JSInspectNodeView: View {
             label: {
                 disclosureLabel(
                     typeText: "Array[\(elements.count)]\(anchorSuffix())",
-                    preview: inlinePreview(value)
+                    preview: isExpanded ? nil : inlinePreview(value)
                 )
             }
         )
@@ -239,7 +239,7 @@ private struct JSInspectNodeView: View {
             label: {
                 disclosureLabel(
                     typeText: "Map{\(entries.count)}\(anchorSuffix())",
-                    preview: inlinePreview(value)
+                    preview: isExpanded ? nil : inlinePreview(value)
                 )
             }
         )
@@ -277,7 +277,7 @@ private struct JSInspectNodeView: View {
             label: {
                 disclosureLabel(
                     typeText: "Set{\(elements.count)}\(anchorSuffix())",
-                    preview: inlinePreview(value)
+                    preview: isExpanded ? nil : inlinePreview(value)
                 )
             }
         )
