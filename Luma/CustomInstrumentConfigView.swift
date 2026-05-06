@@ -16,19 +16,22 @@ struct CustomInstrumentConfigView: View {
             header
 
             GroupBox("Features") {
-                if let def, !def.features.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(def.features) { feature in
-                            featureRow(feature: feature)
+                Group {
+                    if let def, !def.features.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(def.features) { feature in
+                                featureRow(feature: feature)
+                            }
                         }
+                    } else {
+                        Text("This custom instrument does not declare any features.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
-                } else {
-                    Text("This custom instrument does not declare any features.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.leading, 12)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer()
         }
@@ -64,6 +67,7 @@ struct CustomInstrumentConfigView: View {
         let enabled = enabledBinding(for: feature)
         VStack(alignment: .leading, spacing: 6) {
             Toggle(feature.name, isOn: enabled)
+                .platformCheckboxToggleStyle()
             if case .boolean = feature.schema {
                 EmptyView()
             } else {
@@ -80,14 +84,35 @@ struct CustomInstrumentConfigView: View {
 
     @ViewBuilder
     private func requiredFeatureRow(feature: CustomInstrumentDef.Feature) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(feature.name).font(.subheadline)
-            FeatureValueEditor(
-                schema: feature.schema,
-                value: valueBinding(for: feature)
-            )
-            .padding(.leading, 20)
+        if case .boolean = feature.schema {
+            Toggle(feature.name, isOn: requiredBoolBinding(for: feature))
+                .platformCheckboxToggleStyle()
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(feature.name).font(.subheadline)
+                FeatureValueEditor(
+                    schema: feature.schema,
+                    value: valueBinding(for: feature)
+                )
+                .padding(.leading, 20)
+            }
         }
+    }
+
+    private func requiredBoolBinding(for feature: CustomInstrumentDef.Feature) -> Binding<Bool> {
+        Binding(
+            get: {
+                if case .boolean(let b) = config.features[feature.id]?.value { return b }
+                if case .boolean(let b) = feature.schema.defaultValue { return b }
+                return false
+            },
+            set: { newValue in
+                var updated = config
+                let existingEnabled = updated.features[feature.id]?.enabled ?? feature.enabledByDefault
+                updated.features[feature.id] = FeatureState(enabled: existingEnabled, value: .boolean(newValue))
+                config = updated
+            }
+        )
     }
 
     private func enabledBinding(for feature: CustomInstrumentDef.Feature) -> Binding<Bool> {

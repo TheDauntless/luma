@@ -20,18 +20,30 @@ struct FeatureValueEditor: View {
         case .double(_, let lo, let hi):
             doubleEditor(min: lo, max: hi)
         case .string:
-            TextField("", text: stringBinding)
-                .textFieldStyle(.roundedBorder)
-        case .regex:
-            TextField("regex", text: regexBinding)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-        case .combo(let choices, _):
-            Picker("", selection: comboBinding(choices: choices)) {
-                ForEach(choices, id: \.self) { c in Text(c).tag(c) }
+            HStack(spacing: 0) {
+                TextField("", text: stringBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 320)
+                Spacer(minLength: 0)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
+        case .regex:
+            HStack(spacing: 0) {
+                TextField("regex", text: regexBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: 320)
+                Spacer(minLength: 0)
+            }
+        case .combo(let choices, _):
+            HStack(spacing: 0) {
+                Picker("", selection: comboBinding(choices: choices)) {
+                    ForEach(choices) { c in Text(c.name).tag(c.id) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 200)
+                Spacer(minLength: 0)
+            }
         case .object(let fields):
             objectEditor(fields: fields)
         case .array(let item, _):
@@ -48,9 +60,11 @@ struct FeatureValueEditor: View {
                 formatter: integerFormatter
             )
             .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 140)
             if let hint = boundsHint(min: lo, max: hi) {
                 Text(hint).font(.caption2).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -59,9 +73,11 @@ struct FeatureValueEditor: View {
         HStack(spacing: 6) {
             TextField("0", value: doubleBinding, formatter: doubleFormatter)
                 .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 140)
             if let hint = boundsHint(min: lo, max: hi) {
                 Text(hint).font(.caption2).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -79,13 +95,9 @@ struct FeatureValueEditor: View {
         if fields.isEmpty {
             Text("(no fields)").font(.caption).foregroundStyle(.secondary)
         } else {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(fields, id: \.name) { field in
-                    if field.optional {
-                        optionalFieldRow(field: field)
-                    } else {
-                        requiredFieldRow(field: field)
-                    }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+                ForEach(fields, id: \.id) { field in
+                    fieldGridRow(field: field)
                 }
             }
             .padding(8)
@@ -94,21 +106,28 @@ struct FeatureValueEditor: View {
     }
 
     @ViewBuilder
-    private func requiredFieldRow(field: ObjectField) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(field.name)
-                .font(.system(.caption, design: .monospaced))
-                .frame(width: 120, alignment: .leading)
-            FeatureValueEditor(
-                schema: field.schema,
-                value: objectFieldBinding(name: field.name, schema: field.schema)
-            )
+    private func fieldGridRow(field: ObjectField) -> some View {
+        if field.optional {
+            GridRow {
+                optionalFieldContent(field: field)
+                    .gridCellColumns(2)
+            }
+        } else {
+            GridRow {
+                Text(field.name)
+                    .font(.system(.caption, design: .monospaced))
+                    .gridColumnAlignment(.trailing)
+                FeatureValueEditor(
+                    schema: field.schema,
+                    value: objectFieldBinding(id: field.id, schema: field.schema)
+                )
+            }
         }
     }
 
     @ViewBuilder
-    private func optionalFieldRow(field: ObjectField) -> some View {
-        let enabled = objectFieldEnabledBinding(name: field.name, schema: field.schema)
+    private func optionalFieldContent(field: ObjectField) -> some View {
+        let enabled = objectFieldEnabledBinding(id: field.id, schema: field.schema)
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: enabled) {
                 Text(field.name).font(.system(.caption, design: .monospaced))
@@ -119,28 +138,28 @@ struct FeatureValueEditor: View {
             } else if enabled.wrappedValue {
                 FeatureValueEditor(
                     schema: field.schema,
-                    value: objectFieldBinding(name: field.name, schema: field.schema)
+                    value: objectFieldBinding(id: field.id, schema: field.schema)
                 )
                 .padding(.leading, 20)
             }
         }
     }
 
-    private func objectFieldEnabledBinding(name: String, schema: FeatureSchema) -> Binding<Bool> {
+    private func objectFieldEnabledBinding(id: String, schema: FeatureSchema) -> Binding<Bool> {
         Binding(
             get: {
-                if case .object(let fields) = value { return fields[name] != nil }
+                if case .object(let fields) = value { return fields[id] != nil }
                 return false
             },
             set: { newValue in
                 var fields: [String: FeatureValue] = [:]
                 if case .object(let f) = value { fields = f }
                 if newValue {
-                    if fields[name] == nil {
-                        fields[name] = schema.defaultValue
+                    if fields[id] == nil {
+                        fields[id] = schema.defaultValue
                     }
                 } else {
-                    fields.removeValue(forKey: name)
+                    fields.removeValue(forKey: id)
                 }
                 value = .object(fields)
             }
@@ -231,20 +250,20 @@ struct FeatureValueEditor: View {
         )
     }
 
-    private func comboBinding(choices: [String]) -> Binding<String> {
+    private func comboBinding(choices: [ComboChoice]) -> Binding<String> {
         Binding(
             get: {
-                if case .string(let v) = value, choices.contains(v) { return v }
-                return choices.first ?? ""
+                if case .string(let v) = value, choices.contains(where: { $0.id == v }) { return v }
+                return choices.first?.id ?? ""
             },
             set: { value = .string($0) }
         )
     }
 
-    private func objectFieldBinding(name: String, schema: FeatureSchema) -> Binding<FeatureValue> {
+    private func objectFieldBinding(id: String, schema: FeatureSchema) -> Binding<FeatureValue> {
         Binding(
             get: {
-                if case .object(let fields) = value, let v = fields[name] {
+                if case .object(let fields) = value, let v = fields[id] {
                     return v
                 }
                 return schema.defaultValue
@@ -252,7 +271,7 @@ struct FeatureValueEditor: View {
             set: { newValue in
                 var fields: [String: FeatureValue] = [:]
                 if case .object(let f) = value { fields = f }
-                fields[name] = newValue
+                fields[id] = newValue
                 value = .object(fields)
             }
         )
