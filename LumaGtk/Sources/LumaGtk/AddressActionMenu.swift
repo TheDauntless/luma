@@ -38,11 +38,11 @@ enum AddressActionMenu {
         context: AddressContext = AddressContext()
     ) {
         var items: [ContextMenu.Item] = [
-            .init("Open Memory") {
-                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, failureLabel: "Can\u{2019}t open memory")
-            },
             .init("Open Disassembly") {
                 openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, failureLabel: "Can\u{2019}t open disassembly")
+            },
+            .init("Open Memory") {
+                openInsight(engine: engine, sessionID: sessionID, address: address, kind: .memory, failureLabel: "Can\u{2019}t open memory")
             },
         ]
 
