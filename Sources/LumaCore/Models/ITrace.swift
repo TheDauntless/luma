@@ -1,63 +1,59 @@
 import Foundation
 import GRDB
 
-public struct ITraceCaptureRecord: Codable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
-    public static let databaseTableName = "itrace_capture"
+public struct ITrace: Codable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "itrace"
 
     public var id: UUID
     public var sessionID: UUID
-    public var hookID: UUID
-    public var callIndex: Int
-    public var capturedAt: Date
+    public var origin: Origin
     public var displayName: String
-    public var traceData: Data
+    public var startedAt: Date
+    public var stoppedAt: Date?
     public var metadataJSON: Data
+    public var dataSize: Int
     public var lost: Int
+
+    public enum Origin: Codable, Sendable, Hashable {
+        case functionCall(hookID: UUID, callIndex: Int)
+        case thread(threadID: UInt, threadName: String?)
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
         case sessionID = "session_id"
-        case hookID = "hook_id"
-        case callIndex = "call_index"
-        case capturedAt = "captured_at"
+        case origin
         case displayName = "display_name"
-        case traceData = "trace_data"
+        case startedAt = "started_at"
+        case stoppedAt = "stopped_at"
         case metadataJSON = "metadata_json"
+        case dataSize = "data_size"
         case lost
     }
 
     public init(
         id: UUID = UUID(),
         sessionID: UUID,
-        hookID: UUID,
-        callIndex: Int,
+        origin: Origin,
         displayName: String,
-        traceData: Data,
-        metadataJSON: Data,
+        startedAt: Date = Date(),
+        stoppedAt: Date? = nil,
+        metadataJSON: Data = Data(),
+        dataSize: Int = 0,
         lost: Int = 0
     ) {
         self.id = id
         self.sessionID = sessionID
-        self.hookID = hookID
-        self.callIndex = callIndex
-        self.capturedAt = Date()
+        self.origin = origin
         self.displayName = displayName
-        self.traceData = traceData
+        self.startedAt = startedAt
+        self.stoppedAt = stoppedAt
         self.metadataJSON = metadataJSON
+        self.dataSize = dataSize
         self.lost = lost
     }
 
-    public init(from capture: CapturedITrace, sessionID: UUID) {
-        self.init(
-            sessionID: sessionID,
-            hookID: capture.hookID,
-            callIndex: capture.callIndex,
-            displayName: capture.displayName,
-            traceData: capture.traceData,
-            metadataJSON: capture.metadataJSON,
-            lost: capture.lost
-        )
-    }
+    public var isRunning: Bool { stoppedAt == nil }
 
     private static let wireEncoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -80,10 +76,10 @@ public struct ITraceCaptureRecord: Codable, Identifiable, Sendable, FetchableRec
         return obj
     }
 
-    public static func fromWireJSON(_ obj: [String: Any]) -> ITraceCaptureRecord? {
+    public static func fromWireJSON(_ obj: [String: Any]) -> ITrace? {
         guard let data = try? JSONSerialization.data(withJSONObject: obj),
-            let record = try? wireDecoder.decode(ITraceCaptureRecord.self, from: data)
+            let trace = try? wireDecoder.decode(ITrace.self, from: data)
         else { return nil }
-        return record
+        return trace
     }
 }

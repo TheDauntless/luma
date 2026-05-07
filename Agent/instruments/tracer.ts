@@ -1,7 +1,7 @@
 import type _Java from "frida-java-bridge";
 import type { Instrument, InstrumentContext } from '../core/instrument.js';
 import { loadJavaBridge, resolveAnchor, type AnchorJSON } from '../core/resolver.js';
-import { startCapture, stopCapture } from './itrace-capture.js';
+import { startSession, stopSession } from '../core/itrace.js';
 
 interface TracerConfig {
     hooks: TracerHookConfig[];
@@ -231,8 +231,13 @@ class Tracer {
                     const prologueBackup = target !== undefined
                         ? tracer.#prologueBackups.get(target.toString()) ?? null
                         : null;
-                    startCapture(this.threadId, config.id, callIndex, tracer.#ctx, {
-                        targetAddress: target?.toString() ?? null,
+                    const sessionId = `${config.id}:${callIndex}`;
+                    (this as any)._itraceSessionId = sessionId;
+                    startSession({
+                        sessionId,
+                        origin: { kind: "functionCall", hookId: config.id, callIndex },
+                        target: { type: "thread", threadId: this.threadId },
+                        hookTarget: target?.toString() ?? null,
                         prologueBytes: prologueBackup,
                     });
                 }
@@ -243,7 +248,11 @@ class Tracer {
                 const [_, config, __, onLeave] = hook;
                 tracer.#invokeNativeHandler(onLeave, config, this, retval, "<");
 
-                stopCapture(this.threadId);
+                const sessionId = (this as any)._itraceSessionId as string | undefined;
+                if (sessionId !== undefined) {
+                    stopSession(sessionId);
+                    (this as any)._itraceSessionId = undefined;
+                }
             }
         };
     }

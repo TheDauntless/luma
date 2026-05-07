@@ -1,3 +1,25 @@
+public struct ModuleDelta: Sendable {
+    public let added: [ProcessModule]
+    public let removed: [ProcessModule]
+
+    public init(added: [ProcessModule] = [], removed: [ProcessModule] = []) {
+        self.added = added
+        self.removed = removed
+    }
+
+    public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
+
+    public func applied(to base: [ProcessModule]?) -> [ProcessModule] {
+        var result = base ?? []
+        if !removed.isEmpty {
+            let removedBases = Set(removed.map { $0.base })
+            result.removeAll { removedBases.contains($0.base) }
+        }
+        result.append(contentsOf: added)
+        return result
+    }
+}
+
 public struct ProcessModule: Hashable, Identifiable, Codable, Sendable {
     public var id: String { "\(path)@0x\(String(base, radix: 16))" }
     public let name: String

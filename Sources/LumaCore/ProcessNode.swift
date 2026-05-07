@@ -24,6 +24,9 @@ public final class ProcessNode: Identifiable {
     public internal(set) var lastSeenAt: Date
 
     public private(set) var modules: [ProcessModule] = []
+    public private(set) var threads: [ProcessThread] = []
+    public private(set) var mainModule: ProcessModule?
+    public private(set) var processInfo: ProcessInfo?
 
     private let device: Device
     private let process: ProcessDetails
@@ -66,14 +69,16 @@ public final class ProcessNode: Identifiable {
 
     private let _events = AsyncEventSource<RuntimeEvent>()
     private let _replResults = AsyncEventSource<REPLResult>()
-    private let _captures = AsyncEventSource<CapturedITrace>()
-    private let _moduleSnapshots = AsyncEventSource<[ProcessModule]>()
+    private let _traceUpdates = AsyncEventSource<ITrace>()
+    private let _moduleDeltas = AsyncEventSource<ModuleDelta>()
+    private let _threadDeltas = AsyncEventSource<ThreadDelta>()
     private let _detachEvents = AsyncEventSource<SessionDetachReason>()
 
     public var events: AsyncStream<RuntimeEvent> { _events.makeStream() }
     public var replResults: AsyncStream<REPLResult> { _replResults.makeStream() }
-    public var captures: AsyncStream<CapturedITrace> { _captures.makeStream() }
-    public var moduleSnapshots: AsyncStream<[ProcessModule]> { _moduleSnapshots.makeStream() }
+    public var traceUpdates: AsyncStream<ITrace> { _traceUpdates.makeStream() }
+    public var moduleDeltas: AsyncStream<ModuleDelta> { _moduleDeltas.makeStream() }
+    public var threadDeltas: AsyncStream<ThreadDelta> { _threadDeltas.makeStream() }
     public var detachEvents: AsyncStream<SessionDetachReason> { _detachEvents.makeStream() }
 
     private var scriptEventsStarted = false
@@ -90,17 +95,24 @@ public final class ProcessNode: Identifiable {
     private var systemSession: Session?
     private var drainScript: Script?
     private var drainTimer: Task<Void, Never>?
-    private var pendingCaptures: [String: PendingITraceCapture] = [:]
+    private var systemDrainOwner: String?
+    private var pendingTraces: [String: PendingTrace] = [:]
+    private var pendingEmits: [String: Task<Void, Never>] = [:]
+    private var inProcessDrainTasks: [String: Task<Void, Never>] = [:]
+    private static let runningTraceEmitInterval: UInt64 = 250_000_000
+    private static let inProcessDrainInterval: UInt64 = 50_000_000
 
     private let drainAgentSource: String?
+    private let traceStore: TraceStore?
 
-    struct PendingITraceCapture {
-        let hookID: UUID
-        let callIndex: Int
+    struct PendingTrace {
+        let id: UUID
+        let origin: ITrace.Origin
+        let displayName: String
+        let startedAt: Date
         var hookTarget: String?
         var prologueBytes: String?
-        var chunks: [Data]
-        var metadataJSON: Data?
+        var accumulated: Data
         var lost: Int
         var useSystemDrain: Bool
     }
@@ -112,7 +124,8 @@ public final class ProcessNode: Identifiable {
         session: Session,
         script: Script,
         instruments: [InstrumentRef] = [],
-        drainAgentSource: String? = nil
+        drainAgentSource: String? = nil,
+        traceStore: TraceStore? = nil
     ) {
         self.sessionID = sessionID
         self.device = device
@@ -128,6 +141,7 @@ public final class ProcessNode: Identifiable {
         self.lastSeenAt = Date()
         self.instruments = instruments
         self.drainAgentSource = drainAgentSource
+        self.traceStore = traceStore
 
         startObservingSessionState()
         startObservingScriptMessages()
@@ -164,13 +178,14 @@ public final class ProcessNode: Identifiable {
             for await event in session.events {
                 switch event {
                 case .detached(let reason, _):
-                    await self.finalizePendingCapturesOnCrash()
+                    await self.finalizePendingTracesOnCrash()
                     self.failInitialModulesSnapshotWaitersIfNeeded()
                     self._detachEvents.yield(reason)
                     self._events.finish()
                     self._replResults.finish()
-                    self._captures.finish()
-                    self._moduleSnapshots.finish()
+                    self._traceUpdates.finish()
+                    self._moduleDeltas.finish()
+                    self._threadDeltas.finish()
                     self._detachEvents.finish()
                 }
             }
@@ -249,7 +264,42 @@ public final class ProcessNode: Identifiable {
                 }
 
                 modules.append(contentsOf: added)
-                markInitialModulesSnapshotReadyIfNeeded()
+                markInitialModulesReadyIfNeeded()
+
+                _moduleDeltas.yield(ModuleDelta(added: added, removed: removed))
+
+                return true
+
+            case "threads-changed":
+                let addedDicts = (dict["added"] as? [[String: Any]]) ?? []
+                let removedIDs = (dict["removed"] as? [Int]) ?? []
+                let renamedDicts = (dict["renamed"] as? [[String: Any]]) ?? []
+
+                let addedThreads = addedDicts.compactMap(ProcessThread.fromJSON)
+
+                let removedSet = Set(removedIDs.map { UInt($0) })
+                if !removedSet.isEmpty {
+                    threads.removeAll { removedSet.contains($0.id) }
+                }
+
+                threads.append(contentsOf: addedThreads)
+
+                var renames: [ThreadDelta.Rename] = []
+                for entry in renamedDicts {
+                    guard let rawID = entry["id"] as? Int else { continue }
+                    let tid = UInt(rawID)
+                    let newName = entry["name"] as? String
+                    if let i = threads.firstIndex(where: { $0.id == tid }) {
+                        threads[i].name = newName
+                    }
+                    renames.append(ThreadDelta.Rename(id: tid, name: newName))
+                }
+
+                _threadDeltas.yield(ThreadDelta(
+                    added: addedThreads,
+                    removed: Array(removedSet),
+                    renamed: renames
+                ))
 
                 return true
 
@@ -278,45 +328,38 @@ public final class ProcessNode: Identifiable {
                 return true
 
             case "itrace:start":
-                if let hookId = dict["hookId"] as? String,
-                    let callIndex = dict["callIndex"] as? Int,
-                    let bufferLocation = dict["bufferLocation"] as? String
-                {
-                    let hookTarget = dict["hookTarget"] as? String
-                    let prologueBytes = dict["prologueBytes"] as? String
-                    Task { @MainActor in
-                        await self.handleITraceStart(
-                            hookId: hookId, callIndex: callIndex,
-                            bufferLocation: bufferLocation,
-                            hookTarget: hookTarget,
-                            prologueBytes: prologueBytes)
-                    }
+                guard let sessionId = dict["sessionId"] as? String,
+                    let bufferLocation = dict["bufferLocation"] as? String,
+                    let originDict = dict["origin"] as? [String: Any],
+                    let origin = parseTraceOrigin(originDict)
+                else { return false }
+
+                let hookTarget = dict["hookTarget"] as? String
+                let prologueBytes = dict["prologueBytes"] as? String
+                Task { @MainActor in
+                    await self.handleITraceStart(
+                        sessionId: sessionId,
+                        origin: origin,
+                        bufferLocation: bufferLocation,
+                        hookTarget: hookTarget,
+                        prologueBytes: prologueBytes)
                 }
                 return true
 
             case "itrace:stop":
-                if let hookId = dict["hookId"] as? String,
-                    let callIndex = dict["callIndex"] as? Int
-                {
-                    let lost = dict["lost"] as? Int ?? 0
-                    Task { @MainActor in
-                        await self.handleITraceStop(
-                            hookId: hookId, callIndex: callIndex,
-                            lost: lost, data: data)
-                    }
+                guard let sessionId = dict["sessionId"] as? String else { return false }
+                let lost = dict["lost"] as? Int ?? 0
+                Task { @MainActor in
+                    await self.handleITraceStop(sessionId: sessionId, lost: lost, data: data)
                 }
                 return true
 
             case "itrace:chunk":
-                if let hookId = dict["hookId"] as? String,
-                    let callIndex = dict["callIndex"] as? Int,
+                guard let sessionId = dict["sessionId"] as? String,
                     let chunkData = data
-                {
-                    let lost = dict["lost"] as? Int ?? 0
-                    handleITraceChunk(
-                        hookId: hookId, callIndex: callIndex,
-                        data: Array(chunkData), lost: lost)
-                }
+                else { return false }
+                let lost = dict["lost"] as? Int ?? 0
+                handleITraceChunk(sessionId: sessionId, data: Array(chunkData), lost: lost)
                 return true
 
             case "instrument-event":
@@ -372,11 +415,9 @@ public final class ProcessNode: Identifiable {
 
     // MARK: - Module Snapshots
 
-    private func markInitialModulesSnapshotReadyIfNeeded() {
+    private func markInitialModulesReadyIfNeeded() {
         guard moduleSnapshotState == .pending else { return }
         moduleSnapshotState = .ready
-
-        _moduleSnapshots.yield(modules)
 
         let waiters = moduleSnapshotWaiters
         moduleSnapshotWaiters.removeAll(keepingCapacity: false)
@@ -721,6 +762,23 @@ public final class ProcessNode: Identifiable {
         return out
     }
 
+    public func fetchThreadSnapshot(id: UInt) async throws -> ThreadSnapshot? {
+        let raw = try await script.exports.getThreadSnapshot(Int(id))
+        if raw is NSNull { return nil }
+        guard let dict = raw as? [String: Any] else {
+            throw LumaCoreError.protocolViolation("getThreadSnapshot: unexpected response shape")
+        }
+        return ThreadSnapshot.fromJSON(dict)
+    }
+
+    public func enumerateModuleSymbols(name: String) async throws -> ModuleSymbolBundle {
+        let raw = try await script.exports.enumerateModuleSymbols(name)
+        guard let dict = raw as? [String: Any] else {
+            throw LumaCoreError.protocolViolation("enumerateModuleSymbols: unexpected response shape")
+        }
+        return ModuleSymbolBundle.fromJSON(dict)
+    }
+
     public func resolveTargets(scope: String, query: String) async throws -> [[String: Any]] {
         let raw = try await script.exports.resolveTargets([
             "scope": scope,
@@ -740,6 +798,13 @@ public final class ProcessNode: Identifiable {
         else {
             return nil
         }
+        processInfo = info
+        mainModule = ProcessModule(
+            name: info.mainModule.name,
+            path: info.mainModule.path,
+            base: info.mainModule.parsedBase,
+            size: UInt64(info.mainModule.size)
+        )
         return info
     }
 
@@ -747,6 +812,19 @@ public final class ProcessNode: Identifiable {
         public let platform: String
         public let arch: String
         public let pointerSize: Int
+        public let mainModule: MainModule
+
+        public struct MainModule: Codable, Sendable {
+            public let name: String
+            public let path: String
+            public let base: String
+            public let size: Int
+
+            var parsedBase: UInt64 {
+                let trimmed = base.hasPrefix("0x") ? String(base.dropFirst(2)) : base
+                return UInt64(trimmed, radix: 16) ?? 0
+            }
+        }
     }
 
     // MARK: - Instruments
@@ -834,67 +912,158 @@ public final class ProcessNode: Identifiable {
         drainScript != nil
     }
 
+    public func startThreadTraceOnAgent(traceID: UUID, threadID: UInt, threadName: String?) async throws {
+        var args: [String: Any] = [
+            "sessionId": traceID.uuidString,
+            "threadId": Int(threadID),
+        ]
+        if let threadName {
+            args["threadName"] = threadName
+        }
+        try await script.exports.startThreadTrace(JSValue(args))
+    }
+
+    public func stopTraceOnAgent(traceID: UUID) async throws {
+        try await script.exports.stopThreadTrace(JSValue([
+            "sessionId": traceID.uuidString,
+        ]))
+    }
+
     func handleITraceStart(
-        hookId: String, callIndex: Int, bufferLocation: String,
-        hookTarget: String?, prologueBytes: String?
+        sessionId: String,
+        origin: ITrace.Origin,
+        bufferLocation: String,
+        hookTarget: String?,
+        prologueBytes: String?
     ) async {
-        let captureKey = Self.captureKey(hookId: hookId, callIndex: callIndex)
-        pendingCaptures[captureKey] = PendingITraceCapture(
-            hookID: UUID(uuidString: hookId)!,
-            callIndex: callIndex,
+        let pending = PendingTrace(
+            id: UUID(uuidString: sessionId) ?? UUID(),
+            origin: origin,
+            displayName: traceDisplayName(for: origin),
+            startedAt: Date(),
             hookTarget: hookTarget,
             prologueBytes: prologueBytes,
-            chunks: [],
+            accumulated: Data(),
             lost: 0,
             useSystemDrain: false
         )
+        pendingTraces[sessionId] = pending
+        emitTraceUpdate(sessionId: sessionId)
 
-        if let drainScript {
+        if let drainScript, systemDrainOwner == nil {
             do {
                 try await drainScript.exports.openBuffer(bufferLocation)
-                pendingCaptures[captureKey]?.useSystemDrain = true
-                startDrainTimer(for: captureKey)
+                pendingTraces[sessionId]?.useSystemDrain = true
+                systemDrainOwner = sessionId
+                startSystemDrainTimer(for: sessionId)
+                return
             } catch {
             }
         }
+
+        startInProcessDrain(sessionId: sessionId)
     }
 
-    func handleITraceStop(hookId: String, callIndex: Int, lost: Int, data: [UInt8]?) async {
-        let captureKey = Self.captureKey(hookId: hookId, callIndex: callIndex)
+    func handleITraceChunk(sessionId: String, data: [UInt8], lost: Int) {
+        pendingTraces[sessionId]?.accumulated.append(contentsOf: data)
+        pendingTraces[sessionId]?.lost = lost
+        scheduleRunningTraceEmit(sessionId: sessionId)
+    }
 
-        let usedSystemDrain = pendingCaptures[captureKey]?.useSystemDrain == true
-
-        if usedSystemDrain, let drainScript {
+    func handleITraceStop(sessionId: String, lost: Int, data: [UInt8]?) async {
+        if systemDrainOwner == sessionId, let drainScript {
             drainTimer?.cancel()
             drainTimer = nil
-
             do {
                 if let finalChunk = try await drainScript.exports.close() as? [UInt8], !finalChunk.isEmpty {
-                    pendingCaptures[captureKey]?.chunks.append(Data(finalChunk))
+                    pendingTraces[sessionId]?.accumulated.append(contentsOf: finalChunk)
                 }
                 let sysLost = (try? await drainScript.exports.getLost()) as? Int ?? 0
-                pendingCaptures[captureKey]?.lost = sysLost
+                pendingTraces[sessionId]?.lost = sysLost
             } catch {
             }
+            systemDrainOwner = nil
         }
 
         if let data, !data.isEmpty {
-            pendingCaptures[captureKey]?.chunks.append(Data(data))
+            pendingTraces[sessionId]?.accumulated.append(contentsOf: data)
         }
 
-        let currentLost = pendingCaptures[captureKey]?.lost ?? 0
-        pendingCaptures[captureKey]?.lost = max(currentLost, lost)
+        let currentLost = pendingTraces[sessionId]?.lost ?? 0
+        pendingTraces[sessionId]?.lost = max(currentLost, lost)
 
-        await finalizeCapture(key: captureKey)
+        await finalizeTrace(sessionId: sessionId)
     }
 
-    func handleITraceChunk(hookId: String, callIndex: Int, data: [UInt8], lost: Int) {
-        let captureKey = Self.captureKey(hookId: hookId, callIndex: callIndex)
-        pendingCaptures[captureKey]?.chunks.append(Data(data))
-        pendingCaptures[captureKey]?.lost = lost
+    private func scheduleRunningTraceEmit(sessionId: String) {
+        guard pendingEmits[sessionId] == nil else { return }
+        pendingEmits[sessionId] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.runningTraceEmitInterval)
+            guard let self, !Task.isCancelled else { return }
+            self.pendingEmits.removeValue(forKey: sessionId)
+            self.emitTraceUpdate(sessionId: sessionId)
+        }
     }
 
-    private func startDrainTimer(for captureKey: String) {
+    private func emitTraceUpdate(sessionId: String) {
+        cancelPendingEmit(sessionId: sessionId)
+        guard let trace = makeRunningTrace(sessionId: sessionId) else { return }
+        _traceUpdates.yield(trace)
+    }
+
+    private func cancelPendingEmit(sessionId: String) {
+        pendingEmits.removeValue(forKey: sessionId)?.cancel()
+    }
+
+    private func makeRunningTrace(sessionId: String) -> ITrace? {
+        guard let pending = pendingTraces[sessionId] else { return nil }
+        let (traceData, metadataJSON) = decodeAccumulated(pending: pending)
+        return ITrace(
+            id: pending.id,
+            sessionID: sessionID,
+            origin: pending.origin,
+            displayName: pending.displayName,
+            startedAt: pending.startedAt,
+            stoppedAt: nil,
+            metadataJSON: metadataJSON,
+            dataSize: traceData.count,
+            lost: pending.lost
+        )
+    }
+
+    public func livePendingTraceData(traceID: UUID) -> Data? {
+        for pending in pendingTraces.values where pending.id == traceID {
+            let (traceData, _) = decodeAccumulated(pending: pending)
+            return traceData
+        }
+        return nil
+    }
+
+    private func decodeAccumulated(pending: PendingTrace) -> (traceData: Data, metadataJSON: Data) {
+        return ITraceDecoder.parseRawBuffer(
+            pending.accumulated,
+            hookTarget: pending.hookTarget,
+            prologueBytes: pending.prologueBytes
+        )
+    }
+
+    private func startInProcessDrain(sessionId: String) {
+        inProcessDrainTasks[sessionId]?.cancel()
+        inProcessDrainTasks[sessionId] = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.inProcessDrainInterval)
+                guard let self, !Task.isCancelled else { break }
+                if self.pendingTraces[sessionId] == nil { break }
+                _ = try? await self.script.exports.drainLocally(sessionId)
+            }
+        }
+    }
+
+    private func cancelInProcessDrain(sessionId: String) {
+        inProcessDrainTasks.removeValue(forKey: sessionId)?.cancel()
+    }
+
+    private func startSystemDrainTimer(for sessionId: String) {
         drainTimer?.cancel()
         drainTimer = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -904,7 +1073,8 @@ public final class ProcessNode: Identifiable {
 
                 do {
                     if let chunk = try await drainScript.exports.drain() as? [UInt8], !chunk.isEmpty {
-                        self.pendingCaptures[captureKey]?.chunks.append(Data(chunk))
+                        self.pendingTraces[sessionId]?.accumulated.append(contentsOf: chunk)
+                        self.scheduleRunningTraceEmit(sessionId: sessionId)
                     }
                 } catch {
                     break
@@ -913,103 +1083,119 @@ public final class ProcessNode: Identifiable {
         }
     }
 
-    private func finalizeCapture(key captureKey: String) async {
-        guard let capture = pendingCaptures.removeValue(forKey: captureKey) else {
-            return
+    private func finalizeTrace(sessionId: String) async {
+        cancelPendingEmit(sessionId: sessionId)
+        cancelInProcessDrain(sessionId: sessionId)
+        guard let pending = pendingTraces.removeValue(forKey: sessionId) else { return }
+        if systemDrainOwner == sessionId { systemDrainOwner = nil }
+
+        var (traceData, metadataJSON) = decodeAccumulated(pending: pending)
+        if case .functionCall = pending.origin {
+            ITraceDecoder.cleanupAfterCapture(traceData: &traceData, metadataJSON: &metadataJSON)
         }
 
-        let rawData = capture.chunks.reduce(into: Data()) { $0.append($1) }
+        await annotateBlocksWithSymbols(metadataJSON: &metadataJSON)
 
-        var (traceData, metadataJSON) = ITraceDecoder.parseRawBuffer(
-            rawData,
-            hookTarget: capture.hookTarget,
-            prologueBytes: capture.prologueBytes
-        )
+        try? traceStore?.write(traceData, for: pending.id)
 
-        ITraceDecoder.cleanupAfterCapture(traceData: &traceData, metadataJSON: &metadataJSON)
-
-        if var metadata = try? JSONDecoder().decode(ITraceMetadata.self, from: metadataJSON) {
-            let addresses = metadata.blocks.compactMap { ITraceDecoder.parseHexAddress($0.address) }
-            if !addresses.isEmpty {
-                var symbolicated = false
-                if let results = try? await symbolicate(addresses: addresses) {
-                    for (i, result) in results.enumerated() where i < metadata.blocks.count {
-                        let name: String?
-                        switch result {
-                        case .module(let m, let n): name = "\(m)!\(n)"
-                        case .file(let m, let n, _, _): name = "\(m)!\(n)"
-                        case .fileColumn(let m, let n, _, _, _): name = "\(m)!\(n)"
-                        case .failure: name = nil
-                        }
-                        if let name { metadata.blocks[i].name = name; symbolicated = true }
-                    }
-                }
-
-                if !symbolicated {
-                    for (i, addr) in addresses.enumerated() where i < metadata.blocks.count {
-                        if let mod = modules.first(where: { addr >= $0.base && addr < $0.base + $0.size }) {
-                            let offset = addr - mod.base
-                            metadata.blocks[i].name = "\(mod.name)!0x\(String(offset, radix: 16))"
-                        }
-                    }
-                }
-
-                if let data = try? JSONEncoder().encode(metadata) {
-                    metadataJSON = data
-                }
-            }
-        }
-
-        let hookName = instruments.lazy
-            .compactMap { ref -> String? in
-                guard let config = try? TracerConfig.decode(from: ref.configJSON) else { return nil }
-                return config.hooks.first(where: { $0.id == capture.hookID })?.displayName
-            }
-            .first ?? capture.hookID.uuidString
-
-        let displayName = "\(hookName) call #\(capture.callIndex)"
-
-        _captures.yield(CapturedITrace(
-            hookID: capture.hookID,
-            callIndex: capture.callIndex,
-            displayName: displayName,
-            traceData: traceData,
+        let trace = ITrace(
+            id: pending.id,
+            sessionID: sessionID,
+            origin: pending.origin,
+            displayName: pending.displayName,
+            startedAt: pending.startedAt,
+            stoppedAt: Date(),
             metadataJSON: metadataJSON,
-            lost: capture.lost
-        ))
+            dataSize: traceData.count,
+            lost: pending.lost
+        )
+        _traceUpdates.yield(trace)
     }
 
-    private func finalizePendingCapturesOnCrash() async {
-        let keys = Array(pendingCaptures.keys)
+    private func annotateBlocksWithSymbols(metadataJSON: inout Data) async {
+        guard var metadata = try? JSONDecoder().decode(ITraceMetadata.self, from: metadataJSON) else { return }
+
+        let addresses = metadata.blocks.compactMap { ITraceDecoder.parseHexAddress($0.address) }
+        guard !addresses.isEmpty else { return }
+
+        var symbolicated = false
+        if let results = try? await symbolicate(addresses: addresses) {
+            for (i, result) in results.enumerated() where i < metadata.blocks.count {
+                let name: String?
+                switch result {
+                case .module(let m, let n): name = "\(m)!\(n)"
+                case .file(let m, let n, _, _): name = "\(m)!\(n)"
+                case .fileColumn(let m, let n, _, _, _): name = "\(m)!\(n)"
+                case .failure: name = nil
+                }
+                if let name { metadata.blocks[i].name = name; symbolicated = true }
+            }
+        }
+
+        if !symbolicated {
+            for (i, addr) in addresses.enumerated() where i < metadata.blocks.count {
+                if let mod = modules.first(where: { addr >= $0.base && addr < $0.base + $0.size }) {
+                    let offset = addr - mod.base
+                    metadata.blocks[i].name = "\(mod.name)!0x\(String(offset, radix: 16))"
+                }
+            }
+        }
+
+        if let data = try? JSONEncoder().encode(metadata) {
+            metadataJSON = data
+        }
+    }
+
+    private func parseTraceOrigin(_ dict: [String: Any]) -> ITrace.Origin? {
+        guard let kind = dict["kind"] as? String else { return nil }
+        switch kind {
+        case "functionCall":
+            guard let hookIdString = dict["hookId"] as? String,
+                let hookID = UUID(uuidString: hookIdString),
+                let callIndex = dict["callIndex"] as? Int
+            else { return nil }
+            return .functionCall(hookID: hookID, callIndex: callIndex)
+        case "thread":
+            guard let threadId = dict["threadId"] as? Int else { return nil }
+            let threadName = dict["threadName"] as? String
+            return .thread(threadID: UInt(threadId), threadName: threadName)
+        default:
+            return nil
+        }
+    }
+
+    private func traceDisplayName(for origin: ITrace.Origin) -> String {
+        switch origin {
+        case .functionCall(let hookID, let callIndex):
+            let hookName = instruments.lazy
+                .compactMap { ref -> String? in
+                    guard let config = try? TracerConfig.decode(from: ref.configJSON) else { return nil }
+                    return config.hooks.first(where: { $0.id == hookID })?.displayName
+                }
+                .first ?? hookID.uuidString
+            return "\(hookName) call #\(callIndex)"
+        case .thread(let threadID, let threadName):
+            let label = threadName ?? "tid \(threadID)"
+            return "Thread trace: \(label)"
+        }
+    }
+
+    private func finalizePendingTracesOnCrash() async {
+        let keys = Array(pendingTraces.keys)
         for key in keys {
-            guard var capture = pendingCaptures[key],
-                !capture.chunks.isEmpty
-            else {
-                pendingCaptures.removeValue(forKey: key)
-                continue
-            }
-
-            if capture.useSystemDrain, let drainScript {
-                drainTimer?.cancel()
-                drainTimer = nil
-                do {
-                    if let chunk = try await drainScript.exports.close() as? [UInt8], !chunk.isEmpty {
-                        capture.chunks.append(Data(chunk))
-                    }
-                    let lost = (try? await drainScript.exports.getLost()) as? Int ?? 0
-                    capture.lost = lost
-                } catch {}
-            }
-
-            pendingCaptures[key] = capture
-            await finalizeCapture(key: key)
+            await finalizeTrace(sessionId: key)
         }
     }
 
     public func tearDownITrace() async {
         drainTimer?.cancel()
         drainTimer = nil
-        pendingCaptures.removeAll()
+        for task in pendingEmits.values { task.cancel() }
+        pendingEmits.removeAll()
+        for task in inProcessDrainTasks.values { task.cancel() }
+        inProcessDrainTasks.removeAll()
+        pendingTraces.removeAll()
+        systemDrainOwner = nil
 
         if let drainScript {
             try? await drainScript.unload()
@@ -1020,12 +1206,6 @@ public final class ProcessNode: Identifiable {
             try? await systemSession.detach()
             self.systemSession = nil
         }
-    }
-
-    // MARK: - Helpers
-
-    private static func captureKey(hookId: String, callIndex: Int) -> String {
-        "\(hookId):\(callIndex)"
     }
 }
 

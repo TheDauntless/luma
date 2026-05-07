@@ -30,7 +30,9 @@ public struct LumaDocument: Sendable, Equatable {
         return false
     }
 
-    public var sqlitePath: String { url.path }
+    public var sqliteURL: URL { url.appendingPathComponent("db.sqlite") }
+    public var sqlitePath: String { sqliteURL.path }
+    public var tracesDirectory: URL { url.appendingPathComponent("traces", isDirectory: true) }
 
     public init(storage: Storage) {
         self.storage = storage
@@ -78,6 +80,7 @@ public enum LumaDocumentLoader {
             return directory.appendingPathComponent("Untitled-\(UUID().uuidString).luma")
         }()
 
+        try fm.createDirectory(at: url, withIntermediateDirectories: true)
         return LumaDocument(storage: .untitled(url))
     }
 
