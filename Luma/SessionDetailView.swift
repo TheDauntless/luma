@@ -159,7 +159,6 @@ struct SessionDetailView: View {
                     workspace: workspace,
                     selection: $selection
                 )
-                .id(module.id)
                 .frame(minWidth: 360)
             } else {
                 placeholder("Select a module")

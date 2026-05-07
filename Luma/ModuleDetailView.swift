@@ -7,10 +7,10 @@ struct ModuleDetailView: View {
     @ObservedObject var workspace: Workspace
     @Binding var selection: SidebarItemID?
 
-    @State private var bundle: LumaCore.ModuleSymbolBundle?
-    @State private var loadError: String?
+    @State private var bundles: [LumaCore.ProcessModule.ID: LumaCore.ModuleSymbolBundle] = [:]
+    @State private var loadErrors: [LumaCore.ProcessModule.ID: String] = [:]
     @State private var tab: Tab = .exports
-    @State private var loadTask: Task<Void, Never>?
+    @State private var selectedRowID: String?
 
     enum Tab: String, CaseIterable, Identifiable {
         case exports = "Exports"
@@ -20,9 +20,11 @@ struct ModuleDetailView: View {
         var id: String { rawValue }
     }
 
+    private var bundle: LumaCore.ModuleSymbolBundle? { bundles[module.id] }
+    private var loadError: String? { loadErrors[module.id] }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            header
             Picker("", selection: $tab) {
                 ForEach(Tab.allCases) { t in
                     Text(label(for: t)).tag(t)
@@ -35,25 +37,8 @@ struct ModuleDetailView: View {
         }
         .padding(.top, 8)
         .task(id: module.id) {
-            await reload()
-        }
-    }
-
-    private var header: some View {
-        HStack {
-            Text(module.name).font(.headline)
-            Text(String(format: "0x%llx", module.base))
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button {
-                loadTask = Task { await reload() }
-            } label: {
-                Label("Reload", systemImage: "arrow.clockwise")
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(.borderless)
-            .disabled(workspace.engine.node(forSessionID: sessionID) == nil)
+            guard bundle == nil, loadError == nil else { return }
+            await load(module)
         }
     }
 
@@ -82,42 +67,70 @@ struct ModuleDetailView: View {
     }
 
     private func exportsTable(_ rows: [LumaCore.ModuleSymbolBundle.Export]) -> some View {
-        Table(rows) {
+        Table(rows, selection: $selectedRowID) {
             TableColumn("Name", value: \.name)
             TableColumn("Type") { e in Text(e.kind.rawValue) }
             TableColumn("Address") { e in
-                addressCell(
-                    address: e.address,
-                    title: e.name,
-                    context: addressContext(for: e.kind)
-                )
+                addressCell(address: e.address)
             }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
+                addressMenu(
+                    address: row.address,
+                    title: row.name,
+                    context: addressContext(for: row.kind)
+                )
+            }
+        } primaryAction: { ids in
+            if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
+                openInsight(at: row.address, title: row.name, context: addressContext(for: row.kind))
+            }
+        }
     }
 
     private func importsTable(_ rows: [LumaCore.ModuleSymbolBundle.Import]) -> some View {
-        Table(rows) {
+        Table(rows, selection: $selectedRowID) {
             TableColumn("Name", value: \.name)
             TableColumn("Module") { i in Text(i.module ?? "—") }
             TableColumn("Type") { i in Text(i.kind?.rawValue ?? "—") }
             TableColumn("Address") { i in
                 if let addr = i.address {
-                    addressCell(
-                        address: addr,
-                        title: i.name,
-                        context: i.kind.map(addressContext(for:)) ?? AddressContext()
-                    )
+                    addressCell(address: addr)
                 } else {
                     Text("—")
                 }
             }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first,
+                let row = rows.first(where: { $0.id == id }),
+                let address = row.address
+            {
+                addressMenu(
+                    address: address,
+                    title: row.name,
+                    context: row.kind.map(addressContext(for:)) ?? AddressContext()
+                )
+            }
+        } primaryAction: { ids in
+            if let id = ids.first,
+                let row = rows.first(where: { $0.id == id }),
+                let address = row.address
+            {
+                openInsight(
+                    at: address,
+                    title: row.name,
+                    context: row.kind.map(addressContext(for:)) ?? AddressContext()
+                )
+            }
+        }
     }
 
     private func symbolsTable(_ rows: [LumaCore.ModuleSymbolBundle.Symbol]) -> some View {
-        Table(rows) {
+        Table(rows, selection: $selectedRowID) {
             TableColumn("Name", value: \.name)
             TableColumn("Type") { s in Text(s.type) }
             TableColumn("Section") { s in Text(s.sectionID ?? "—") }
@@ -126,49 +139,42 @@ struct ModuleDetailView: View {
                     .font(.system(.body, design: .monospaced))
             }
             TableColumn("Address") { s in
-                addressCell(
-                    address: s.address,
-                    title: s.name,
-                    context: addressContext(for: s)
-                )
+                addressCell(address: s.address)
             }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
+                addressMenu(
+                    address: row.address,
+                    title: row.name,
+                    context: addressContext(for: row)
+                )
+            }
+        } primaryAction: { ids in
+            if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
+                openInsight(at: row.address, title: row.name, context: addressContext(for: row))
+            }
+        }
     }
 
-    private func addressCell(
-        address: UInt64,
-        title: String,
-        context: AddressContext
-    ) -> some View {
+    private func addressCell(address: UInt64) -> some View {
         Text(String(format: "0x%llx", address))
             .font(.system(.body, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { openInsight(at: address, title: title, context: context) }
-            .contextMenu { addressMenu(address: address, title: title, context: context) }
     }
 
     @ViewBuilder
     private func addressMenu(address: UInt64, title: String, context: AddressContext) -> some View {
         Button {
-            openInsight(at: address, title: title, context: context)
+            openInsight(at: address, title: title, kindOverride: .disassembly)
         } label: {
-            Label(defaultInsightLabel(for: context), systemImage: defaultInsightIcon(for: context))
+            Label("Open Disassembly", systemImage: "hammer")
         }
-
-        Divider()
 
         Button {
             openInsight(at: address, title: title, kindOverride: .memory)
         } label: {
             Label("Open Memory", systemImage: "doc.text.magnifyingglass")
-        }
-
-        Button {
-            openInsight(at: address, title: title, kindOverride: .disassembly)
-        } label: {
-            Label("Open Disassembly", systemImage: "hammer")
         }
 
         let actions = workspace.engine.addressActions(sessionID: sessionID, address: address, context: context)
@@ -216,22 +222,22 @@ struct ModuleDetailView: View {
                 )
                 selection = .insight(sessionID, insight.id)
             } catch {
-                loadError = error.localizedDescription
+                loadErrors[module.id] = error.localizedDescription
             }
         }
     }
 
-    private func reload() async {
-        loadError = nil
+    private func load(_ module: LumaCore.ProcessModule) async {
         guard let node = workspace.engine.node(forSessionID: sessionID) else {
-            loadError = "Process is detached."
-            bundle = nil
+            loadErrors[module.id] = "Process is detached."
             return
         }
         do {
-            bundle = try await node.enumerateModuleSymbols(name: module.name)
+            let result = try await node.enumerateModuleSymbols(name: module.name)
+            bundles[module.id] = result
+            loadErrors.removeValue(forKey: module.id)
         } catch {
-            loadError = error.localizedDescription
+            loadErrors[module.id] = error.localizedDescription
         }
     }
 }
