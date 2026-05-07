@@ -135,9 +135,15 @@ final class LumaApplication {
         let key = ObjectIdentifier(window)
 
         do {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: document.url, withIntermediateDirectories: true)
+            try? fm.createDirectory(at: document.tracesDirectory, withIntermediateDirectories: true)
+
             let store = try ProjectStore(path: document.sqlitePath)
+            let traces = try TraceStore(directory: document.tracesDirectory)
             let engine = Engine(
                 store: store,
+                traces: traces,
                 dataDirectory: LumaAppPaths.shared.dataDirectory,
                 gitHubAuth: ensuredWelcomeModel().gitHubAuth
             )

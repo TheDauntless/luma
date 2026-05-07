@@ -324,10 +324,7 @@ final class WelcomeWindow {
         guard let application else { return }
         let baseDir = LumaAppPaths.shared.untitledDirectory
         let url = Self.untitledURL(in: baseDir, named: lab.title)
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: url.path) {
-            _ = fm.createFile(atPath: url.path, contents: Data())
-        }
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         CollaborationJoinQueue.shared.enqueue(labID: lab.id)
         application.openWindow(forFile: url)
         window.close()
