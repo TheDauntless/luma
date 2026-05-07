@@ -22,7 +22,8 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
     public var lastAttachedAt: Date?
 
     public var processInfo: ProcessInfo?
-    public var lastKnownModules: [PersistedModule]?
+    public var lastKnownModules: [ProcessModule]?
+    public var lastKnownThreads: [ProcessThread]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -40,6 +41,7 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         case lastAttachedAt = "last_attached_at"
         case processInfo = "process_info"
         case lastKnownModules = "last_known_modules"
+        case lastKnownThreads = "last_known_threads"
     }
 
     public init(
@@ -61,18 +63,6 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         self.detachReason = .applicationRequested
         self.createdAt = Date()
         self.lastKnownPID = lastKnownPID
-    }
-
-    public struct PersistedModule: Codable, Sendable {
-        public let name: String
-        public let base: UInt64
-        public let size: UInt64
-
-        public init(name: String, base: UInt64, size: UInt64) {
-            self.name = name
-            self.base = base
-            self.size = size
-        }
     }
 
     public struct ProcessInfo: Codable, Sendable {
