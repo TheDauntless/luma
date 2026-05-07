@@ -97,15 +97,26 @@ is gitignored — it is produced at build time.
 - **`HookPackLibrary`** — discovers hook packs from a directory and
   produces `InstrumentDescriptor`s. Engine owns one rooted at
   `dataDirectory/HookPacks`.
-- **`AddressAction`** — pluggable per-address action providers.
-  The tracer registers itself at engine init; future instrument
-  kinds can call `engine.registerAddressActionProvider`.
-- **Persistence (GRDB / SQLite)** — `ProjectStore` with
-  `ProcessSession`, `InstrumentInstance`, `REPLCell`,
-  `NotebookEntry`, `ITraceCaptureRecord`, `AddressInsight`,
+- **`AddressAction` / `ThreadAction`** — pluggable per-address and
+  per-thread action providers. The tracer registers itself at engine
+  init; future instrument kinds can call
+  `engine.registerAddressActionProvider` /
+  `registerThreadActionProvider`. `AddressContext` (kind: code /
+  function / data) lets providers tailor actions per call site.
+- **Persistence (GRDB / SQLite)** — `.luma` is a directory document
+  containing `db.sqlite` and `traces/<uuid>.bin`. `ProjectStore` owns
+  the database with row models for `ProcessSession`,
+  `InstrumentInstance`, `REPLCell`, `NotebookEntry`, `ITrace` (metadata
+  only; data lives in `TraceStore`), `AddressInsight`,
   `RemoteDeviceConfig`, `ProjectPackagesState`, `InstalledPackage`,
-  `ProjectCollaborationState`, `TargetPickerState`. Schema
-  migrations live in `migrator` inside `ProjectStore.swift`.
+  `ProjectCollaborationState`, `TargetPickerState`, plus UI-state
+  singletons `ProjectUIState` and per-session `SessionUIState`.
+  Schema is created with `if not exists` on every open; pre-release,
+  no migrations.
+- **`TraceStore`** — file-backed blob store for raw ITrace data.
+  Engine routes reads through `loadTraceData(traceID:sessionID:expectedSize:)`,
+  which checks live in-memory pending state, then the local file,
+  then falls back to a paginated server fetch via `CollaborationSession`.
 - **`CollaborationSession`** — portal bus, rooms, notebook sync,
   chat. `GitHubAuth` is a separate `@Observable` actor that owns
   the OAuth device flow and token storage; `Engine.startCollaboration`
