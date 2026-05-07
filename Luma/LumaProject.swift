@@ -21,6 +21,11 @@ struct LumaProject: FileDocument {
     }
 
     init(configuration: ReadConfiguration) throws {
+        guard configuration.file.isDirectory,
+            configuration.file.fileWrappers?["db.sqlite"] != nil
+        else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         self.workingProjectURL = Self.uniqueWorkingCopyURL()
         try copyFileWrapper(configuration.file, to: workingProjectURL)
         Self.ensureProjectExists(at: workingProjectURL)
