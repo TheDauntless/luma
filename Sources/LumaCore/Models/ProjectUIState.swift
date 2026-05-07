@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public struct ProjectUIState: Codable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
+public struct ProjectUIState: Codable, Equatable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "project_ui_state"
 
     public var id: UUID
