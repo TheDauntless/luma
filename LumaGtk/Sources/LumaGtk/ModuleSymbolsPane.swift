@@ -13,12 +13,12 @@ final class ModuleSymbolsPane {
     private let sessionID: UUID
     private let module: LumaCore.ProcessModule
 
-    private let header: Label
     private let toggleBar: Box
     private let exportsButton: ToggleButton
     private let importsButton: ToggleButton
     private let symbolsButton: ToggleButton
     private let listContainer: Box
+    private let statusLabel: Label
 
     private var bundle: LumaCore.ModuleSymbolBundle?
     private var loadTask: Task<Void, Never>?
@@ -38,10 +38,6 @@ final class ModuleSymbolsPane {
         widget = Box(orientation: .vertical, spacing: 8)
         widget.hexpand = true
 
-        header = Label(str: "\(module.name) — loading…")
-        header.halign = .start
-        header.add(cssClass: "heading")
-
         exportsButton = ToggleButton()
         exportsButton.label = "Exports"
         exportsButton.active = true
@@ -60,12 +56,16 @@ final class ModuleSymbolsPane {
         toggleBar.append(child: importsButton)
         toggleBar.append(child: symbolsButton)
 
+        statusLabel = Label(str: "Loading\u{2026}")
+        statusLabel.halign = .start
+        statusLabel.add(cssClass: "dim-label")
+
         listContainer = Box(orientation: .vertical, spacing: 0)
         listContainer.hexpand = true
         listContainer.vexpand = true
 
-        widget.append(child: header)
         widget.append(child: toggleBar)
+        widget.append(child: statusLabel)
         widget.append(child: listContainer)
 
         exportsButton.onToggled { [weak self] _ in
@@ -100,7 +100,8 @@ final class ModuleSymbolsPane {
     private func load() {
         loadTask?.cancel()
         guard let engine, let node = engine.node(forSessionID: sessionID) else {
-            header.setText(str: "\(module.name) — process detached")
+            statusLabel.setText(str: "Process detached")
+            statusLabel.visible = true
             return
         }
 
@@ -111,17 +112,18 @@ final class ModuleSymbolsPane {
                 guard let self else { return }
                 self.bundle = result
                 self.updateTabLabels()
+                self.statusLabel.visible = false
                 self.renderCurrent()
             } catch {
                 guard let self else { return }
-                self.header.setText(str: "\(moduleName) — \(error.localizedDescription)")
+                self.statusLabel.setText(str: error.localizedDescription)
+                self.statusLabel.visible = true
             }
         }
     }
 
     private func updateTabLabels() {
         guard let bundle else { return }
-        header.setText(str: module.name)
         exportsButton.label = "Exports (\(bundle.exports.count))"
         importsButton.label = "Imports (\(bundle.imports.count))"
         symbolsButton.label = "Symbols (\(bundle.symbols.count))"
@@ -137,7 +139,7 @@ final class ModuleSymbolsPane {
         scroll.setSizeRequest(width: -1, height: 280)
 
         let list = ListBox()
-        list.selectionMode = .none
+        list.selectionMode = .single
         list.add(cssClass: "boxed-list")
         scroll.set(child: list)
 
@@ -179,7 +181,6 @@ final class ModuleSymbolsPane {
 
     private func makeRow(title: String, typeLabel: String, address: UInt64?, context: AddressContext) -> ListBoxRow {
         let row = ListBoxRow()
-        row.selectable = false
 
         let body = Box(orientation: .horizontal, spacing: 12)
         body.marginStart = 12
