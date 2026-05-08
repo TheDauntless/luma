@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200" width="520" height="200" role="img" aria-label="Luma">
+  <title>Luma</title>
+  <defs>
+    <radialGradient id="luma-mote-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#EF6456" stop-opacity="0.85"/>
+      <stop offset="55%"  stop-color="#EF6456" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#EF6456" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="luma-trail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#EF6456" stop-opacity="0"/>
+      <stop offset="55%"  stop-color="#EF6456" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#EF6456" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Optional cream backdrop; remove this rect for transparent use. -->
+  <rect width="100%" height="100%" fill="#fdfcfa"/>
+
+  <!-- Soft horizontal trail anchored under the wordmark, fading at both ends. -->
+  <rect x="80" y="148" width="360" height="2" fill="url(#luma-trail)"/>
+
+  <!-- Rising mote: glowing halo + deep coral core, hovering above the 'u'. -->
+  <circle cx="245" cy="46" r="26" fill="url(#luma-mote-halo)"/>
+  <circle cx="245" cy="46" r="5.5" fill="#D14A3C"/>
+
+  <!-- Wordmark. -->
+  <text x="260" y="135"
+        text-anchor="middle"
+        font-family="'SF Pro Rounded','SF Pro Display',system-ui,-apple-system,'Helvetica Neue',Inter,sans-serif"
+        font-size="116"
+        font-weight="600"
+        letter-spacing="-3"
+        fill="#5E4C5A">luma</text>
+</svg>
