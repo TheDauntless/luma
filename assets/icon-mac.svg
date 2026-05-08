@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFCF8"/>
+      <stop offset="1" stop-color="#F4EBE0"/>
+    </linearGradient>
+    <radialGradient id="moteGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#EF6456" stop-opacity="0.85"/>
+      <stop offset="55%"  stop-color="#EF6456" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#EF6456" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="225" ry="225" fill="url(#bg)"/>
+
+  <g transform="translate(-54 -28) rotate(-20 566 512)">
+    <path d="M 322 212 L 472 212 L 472 662 L 810 662 L 810 812 L 322 812 Z"
+          fill="#EF6456"/>
+  </g>
+
+  <circle cx="793" cy="210" r="90" fill="url(#moteGlow)"/>
+  <circle cx="793" cy="210" r="20" fill="#D14A3C"/>
+</svg>
