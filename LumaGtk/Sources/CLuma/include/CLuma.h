@@ -85,6 +85,16 @@ bool luma_image_normalize_to_png(const unsigned char *in_bytes,
                                   unsigned char **out_bytes,
                                   size_t *out_size);
 
+// Welcome window animated GPU backdrop. Returns a new GtkGLArea
+// (as a GtkWidget*) that renders rising coral/plum motes over a
+// frida.re-style cream or plum field. The widget owns its OpenGL
+// resources via realize/unrealize and self-drives redraws.
+void *luma_welcome_backdrop_new(void);
+
+// Toggle the backdrop palette between dark plum (true) and light
+// cream (false).
+void luma_welcome_backdrop_set_dark(void *widget, bool dark);
+
 #ifdef __cplusplus
 }
 #endif

@@ -78,28 +78,30 @@ let lumaExecutableIconResource = compileWindowsExecutableIcon()
 #endif
 
 #if os(macOS)
-let cLumaSources: [String] = ["shim_gtk.c", "shim_webkit.m"]
+let cLumaSources: [String] = ["shim_gtk.c", "welcome_backdrop.c", "shim_webkit.m"]
 let cLumaCSettings: [CSetting] = [
-    .unsafeFlags(pkgConfigFlags(["gtk4"])),
+    .unsafeFlags(pkgConfigFlags(["gtk4", "epoxy"])),
 ]
 let cLumaCxxSettings: [CXXSetting] = []
 let cLumaLinkerSettings: [LinkerSetting] = [
     .linkedFramework("WebKit"),
+    .unsafeFlags(pkgConfigFlags(["epoxy"], libs: true)),
 ]
 let lumaGtkLinkerSettings: [LinkerSetting] = []
 #elseif os(Windows)
-let cLumaSources: [String] = ["shim_gtk.c", "shim_webview2.cpp"]
+let cLumaSources: [String] = ["shim_gtk.c", "welcome_backdrop.c", "shim_webview2.cpp"]
 let cLumaCSettings: [CSetting] = [
-    .unsafeFlags(pkgConfigFlags(["gtk4"])),
+    .unsafeFlags(pkgConfigFlags(["gtk4", "epoxy"])),
 ]
 let cLumaCxxSettings: [CXXSetting] = [
-    .unsafeFlags(pkgConfigFlags(["gtk4"])),
+    .unsafeFlags(pkgConfigFlags(["gtk4", "epoxy"])),
 ]
 let cLumaLinkerSettings: [LinkerSetting] = [
     .linkedLibrary("WebView2Loader.dll"),
     .linkedLibrary("ole32"),
     .linkedLibrary("oleaut32"),
     .linkedLibrary("runtimeobject"),
+    .linkedLibrary("epoxy"),
 ]
 // Windows: produce a GUI app (no console window). Swift's runtime
 // still calls main(), so redirect the linker entry to the C runtime's
@@ -116,16 +118,17 @@ let lumaGtkLinkerSettings: [LinkerSetting] = [
     .unsafeFlags(windowsGuiLinkerFlags + (lumaExecutableIconResource.map { [$0] } ?? []))
 ]
 #else
-let cLumaSources: [String] = ["shim_gtk.c", "shim_webkitgtk.c"]
+let cLumaSources: [String] = ["shim_gtk.c", "welcome_backdrop.c", "shim_webkitgtk.c"]
 let cLumaCSettings: [CSetting] = [
     .unsafeFlags(
-        pkgConfigFlags(["webkitgtk-6.0", "gtk4", "libsoup-3.0"])
+        pkgConfigFlags(["webkitgtk-6.0", "gtk4", "libsoup-3.0", "epoxy"])
     ),
 ]
 let cLumaCxxSettings: [CXXSetting] = []
 let cLumaLinkerSettings: [LinkerSetting] = [
     .linkedLibrary("webkitgtk-6.0"),
     .linkedLibrary("javascriptcoregtk-6.0"),
+    .linkedLibrary("epoxy"),
 ]
 let lumaGtkLinkerSettings: [LinkerSetting] = [
     // Fedora's Swift 6.2 ships libswiftObservation.so with an unresolved

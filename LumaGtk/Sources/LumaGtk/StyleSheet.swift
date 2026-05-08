@@ -76,6 +76,31 @@ enum StyleSheet {
         background-color: alpha(@theme_fg_color, 0.14);
     }
 
+    .luma-wordmark {
+        font-family: sans-serif;
+        font-size: 56pt;
+        font-weight: 600;
+        letter-spacing: -2px;
+        color: #EF6456;
+    }
+    .luma-wordmark.is-dark {
+        color: #EDE6E1;
+    }
+
+    label.luma-welcome-tagline:not(.is-dark) {
+        color: #5E4C5A;
+        opacity: 1.0;
+    }
+
+    .luma-wordmark-trail {
+        min-height: 2px;
+        min-width: 200px;
+        background-image: linear-gradient(to right,
+            alpha(#EF6456, 0.0) 0%,
+            alpha(#EF6456, 0.55) 50%,
+            alpha(#EF6456, 0.0) 100%);
+    }
+
     .luma-loading-capsule {
         background-color: alpha(@theme_bg_color, 0.85);
         border: 1px solid alpha(@theme_fg_color, 0.12);

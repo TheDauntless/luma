@@ -35,6 +35,10 @@ final class WelcomeWindow {
     private var quickActionHandlers: [UInt: () -> Void] = [:]
     private var labRowsByIdentifier: [UInt: WelcomeModel.LabSummary] = [:]
     private var openSignInDialog: Adw.Dialog?
+    private var backdropWidget: UnsafeMutableRawPointer?
+    private var wordmarkLabel: Label?
+    private var taglineLabel: Label?
+    private var themeToken: gulong = 0
 
     init(app: Gtk.Application, application: LumaApplication, welcome: WelcomeModel) {
         self.application = application
@@ -78,9 +82,10 @@ final class WelcomeWindow {
         clamp.set(child: contentBox)
 
         let header = Adw.HeaderBar()
+        header.add(cssClass: "flat")
         let toolbar = Adw.ToolbarView()
         toolbar.addTopBar(widget: header)
-        toolbar.set(content: clamp)
+        toolbar.set(content: makeBackdropOverlay(content: clamp))
         window.set(content: toolbar)
 
         let closeHandler: (Gtk.WindowRef) -> Bool = { [weak self] _ in
@@ -110,21 +115,80 @@ final class WelcomeWindow {
         contentBox.append(child: makeLabsSection())
     }
 
+    private func makeBackdropOverlay(content: Widget) -> Widget {
+        let overlay = Overlay()
+        overlay.hexpand = true
+        overlay.vexpand = true
+        if let raw = luma_welcome_backdrop_new() {
+            backdropWidget = raw
+            luma_welcome_backdrop_set_dark(raw, ThemeWatcher.isDarkMode())
+            themeToken = ThemeWatcher.subscribe(owner: self) { owner in
+                if let raw = owner.backdropWidget {
+                    luma_welcome_backdrop_set_dark(raw, ThemeWatcher.isDarkMode())
+                }
+                if let wordmark = owner.wordmarkLabel {
+                    owner.applyDarkClass(wordmark)
+                }
+                if let tagline = owner.taglineLabel {
+                    owner.applyDarkClass(tagline)
+                }
+            }
+            let backdrop = WidgetRef(raw: raw)
+            backdrop.hexpand = true
+            backdrop.vexpand = true
+            overlay.set(child: backdrop)
+        }
+        content.hexpand = true
+        content.vexpand = true
+        overlay.addOverlay(widget: content)
+        overlay.setMeasureOverlay(widget: content, measure: true)
+        return overlay
+    }
+
+    private func applyDarkClass(_ label: Label) {
+        if ThemeWatcher.isDarkMode() {
+            label.add(cssClass: "is-dark")
+        } else {
+            label.remove(cssClass: "is-dark")
+        }
+    }
+
+    deinit {
+        if themeToken != 0 {
+            ThemeWatcher.unsubscribe(handlerID: themeToken)
+        }
+    }
+
     private func makeHero() -> Widget {
-        let box = Box(orientation: .vertical, spacing: 16)
+        let box = Box(orientation: .vertical, spacing: 14)
         box.halign = .center
 
-        let icon = Image(iconName: "re.frida.Luma")
-        icon.pixelSize = 104
-        icon.halign = .center
-        box.append(child: icon)
+        let wordmarkBox = Box(orientation: .vertical, spacing: 6)
+        wordmarkBox.halign = .center
 
-        let subtitle = Label(str: "The official Frida GUI.")
+        let wordmark = Label(str: "Luma")
+        wordmark.add(cssClass: "luma-wordmark")
+        wordmark.halign = .center
+        applyDarkClass(wordmark)
+        wordmarkLabel = wordmark
+        wordmarkBox.append(child: wordmark)
+
+        let trail = Box(orientation: .horizontal, spacing: 0)
+        trail.add(cssClass: "luma-wordmark-trail")
+        trail.halign = .center
+        wordmarkBox.append(child: trail)
+
+        box.append(child: wordmarkBox)
+
+        let subtitle = Label(str: "The official Frida GUI")
         subtitle.add(cssClass: "title-3")
         subtitle.add(cssClass: "dim-label")
+        subtitle.add(cssClass: "luma-welcome-tagline")
         subtitle.halign = .center
         subtitle.wrap = true
         subtitle.justify = .center
+        applyDarkClass(subtitle)
+        taglineLabel = subtitle
         box.append(child: subtitle)
 
         return box
