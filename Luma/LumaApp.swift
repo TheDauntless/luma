@@ -40,6 +40,7 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
                 )
             }
             .defaultSize(width: 1100, height: 680)
+            .windowResizability(.contentMinSize)
             .commands {
                 CommandGroup(after: .appInfo) {
                     CheckForUpdatesView(updater: updater)

@@ -14,7 +14,7 @@ struct MissionInputBar: View {
                 .font(.body)
                 .scrollContentBackground(.hidden)
                 .padding(6)
-                .background(Color(NSColor.textBackgroundColor))
+                .background(.background)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
@@ -26,7 +26,7 @@ struct MissionInputBar: View {
                 .disabled(trimmedDraft.isEmpty)
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(.thinMaterial)
     }
 
     @ViewBuilder
