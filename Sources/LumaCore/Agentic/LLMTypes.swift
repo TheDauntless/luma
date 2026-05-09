@@ -164,6 +164,7 @@ public struct LLMTurnRequest: Sendable {
     public var maxOutputTokens: Int
     public var thinkingBudget: Int
     public var temperature: Double?
+    public var mission: Mission?
 
     public init(
         modelID: String,
@@ -172,7 +173,8 @@ public struct LLMTurnRequest: Sendable {
         tools: [LLMToolSpec],
         maxOutputTokens: Int,
         thinkingBudget: Int = 0,
-        temperature: Double? = nil
+        temperature: Double? = nil,
+        mission: Mission? = nil
     ) {
         self.modelID = modelID
         self.systemBlocks = systemBlocks
@@ -181,6 +183,7 @@ public struct LLMTurnRequest: Sendable {
         self.maxOutputTokens = maxOutputTokens
         self.thinkingBudget = thinkingBudget
         self.temperature = temperature
+        self.mission = mission
     }
 }
 

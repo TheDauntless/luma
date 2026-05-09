@@ -226,7 +226,8 @@ public final class MissionExecutor {
             tools: tools,
             maxOutputTokens: min(maxOut, 16_384),
             thinkingBudget: mission.thinkingBudget,
-            temperature: mission.temperature
+            temperature: mission.temperature,
+            mission: mission
         )
     }
 

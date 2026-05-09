@@ -1,0 +1,322 @@
+import Foundation
+import Network
+
+@MainActor
+public final class MCPServer {
+    public typealias ToolCallObserver = @MainActor (String, [String: Any]) -> Void
+    public typealias ToolResultObserver = @MainActor (String, ActionResult) -> Void
+
+    public var onToolStarted: ToolCallObserver?
+    public var onToolFinished: ToolResultObserver?
+
+    private let queue = DispatchQueue(label: "luma.mcp.server")
+    private var listener: NWListener?
+
+    private weak var engine: Engine?
+    private let mission: Mission
+    private let toolNames: Set<String>
+
+    public init(engine: Engine, mission: Mission, toolNames: [String]) {
+        self.engine = engine
+        self.mission = mission
+        self.toolNames = Set(toolNames)
+    }
+
+    public func start() async throws -> URL {
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .loopback
+        parameters.allowLocalEndpointReuse = true
+        let listener = try NWListener(using: parameters, on: .any)
+        self.listener = listener
+
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in
+            let resumed = ResumeFlag()
+            listener.stateUpdateHandler = { state in
+                guard !resumed.flip() else { return }
+                switch state {
+                case .ready:
+                    guard let port = listener.port else {
+                        cont.resume(throwing: MCPServerError.listenerFailed("no port"))
+                        return
+                    }
+                    cont.resume(returning: URL(string: "http://127.0.0.1:\(port.rawValue)/mcp")!)
+                case .failed(let error):
+                    cont.resume(throwing: error)
+                case .cancelled:
+                    cont.resume(throwing: MCPServerError.listenerFailed("cancelled before ready"))
+                default:
+                    resumed.unflip()
+                }
+            }
+            listener.newConnectionHandler = { [weak self] conn in
+                guard let self else { conn.cancel(); return }
+                self.accept(conn)
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    public func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    nonisolated private func accept(_ conn: NWConnection) {
+        conn.start(queue: queue)
+        readRequest(on: conn, accumulated: Data())
+    }
+
+    nonisolated private func readRequest(on conn: NWConnection, accumulated: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, _, error in
+            guard let self else { conn.cancel(); return }
+            if error != nil { conn.cancel(); return }
+            var buffer = accumulated
+            if let data { buffer.append(data) }
+            guard let parsed = parseHTTPRequest(buffer) else {
+                self.readRequest(on: conn, accumulated: buffer)
+                return
+            }
+
+            Task { @MainActor in
+                let response = await self.dispatch(method: parsed.method, path: parsed.path, body: parsed.body)
+                let bytes = encodeHTTPResponse(response)
+                conn.send(content: bytes, completion: .contentProcessed { _ in
+                    conn.cancel()
+                })
+            }
+        }
+    }
+
+    private func dispatch(method: String, path: String, body: Data) async -> HTTPResponse {
+        if method != "POST" {
+            return HTTPResponse(status: 405, body: Data("Method Not Allowed".utf8), contentType: "text/plain")
+        }
+        guard let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return jsonRPCError(id: nil, code: -32_700, message: "parse error")
+        }
+        let rpcMethod = (request["method"] as? String) ?? ""
+        let rpcID = request["id"]
+        let params = (request["params"] as? [String: Any]) ?? [:]
+
+        switch rpcMethod {
+        case "initialize":
+            return jsonRPCResult(id: rpcID, result: [
+                "protocolVersion": "2025-06-18",
+                "capabilities": ["tools": [String: Any]()],
+                "serverInfo": ["name": "luma", "version": "1"],
+            ])
+
+        case "notifications/initialized", "notifications/cancelled", "notifications/progress":
+            return HTTPResponse(status: 204, body: Data(), contentType: "application/json")
+
+        case "tools/list":
+            return jsonRPCResult(id: rpcID, result: ["tools": listMCPTools()])
+
+        case "tools/call":
+            return await handleToolCall(id: rpcID, params: params)
+
+        default:
+            return jsonRPCError(id: rpcID, code: -32_601, message: "method not found: \(rpcMethod)")
+        }
+    }
+
+    private func listMCPTools() -> [[String: Any]] {
+        guard let engine else { return [] }
+        return engine.missionTools.specs()
+            .filter { toolNames.isEmpty || toolNames.contains($0.name) }
+            .map { spec -> [String: Any] in
+                let schema = (try? JSONSerialization.jsonObject(with: Data(spec.inputSchemaJSON.utf8)))
+                    ?? ["type": "object", "properties": [String: Any]()]
+                return [
+                    "name": spec.name,
+                    "description": spec.description,
+                    "inputSchema": schema,
+                ]
+            }
+    }
+
+    private func handleToolCall(id rpcID: Any?, params: [String: Any]) async -> HTTPResponse {
+        guard let toolName = params["name"] as? String else {
+            return jsonRPCError(id: rpcID, code: -32_602, message: "missing tool name")
+        }
+        let arguments = (params["arguments"] as? [String: Any]) ?? [:]
+
+        guard let engine else {
+            return jsonRPCError(id: rpcID, code: -32_603, message: "engine unavailable")
+        }
+        guard let spec = engine.missionTools.spec(named: toolName) else {
+            return jsonRPCError(id: rpcID, code: -32_602, message: "unknown tool: \(toolName)")
+        }
+
+        onToolStarted?(toolName, arguments)
+
+        let sessionID = (arguments["session_id"] as? String).flatMap(UUID.init(uuidString:))
+        let argsJSON = serializeArgs(arguments)
+        let toolCallID = idString(rpcID) ?? UUID().uuidString
+
+        var action = MissionAction(
+            missionID: mission.id,
+            turnID: nil,
+            toolName: toolName,
+            argsJSON: argsJSON,
+            isObserve: spec.isObserve,
+            sessionID: sessionID,
+            toolCallID: toolCallID
+        )
+        action.status = .running
+        action.decidedAt = Date()
+        try? engine.store.save(action)
+        engine.collaboration.enqueueMissionAction(action)
+
+        let invocation = ActionInvocation(
+            args: arguments,
+            mission: mission,
+            sessionID: sessionID,
+            toolCallID: toolCallID
+        )
+
+        let result: ActionResult
+        do {
+            result = try await engine.missionTools.execute(toolName, invocation: invocation)
+        } catch {
+            action.status = .failed
+            action.error = error.localizedDescription
+            action.completedAt = Date()
+            try? engine.store.save(action)
+            engine.collaboration.enqueueMissionAction(action)
+            let payload: [String: Any] = [
+                "content": [["type": "text", "text": "error: \(error.localizedDescription)"]],
+                "isError": true,
+            ]
+            return jsonRPCResult(id: rpcID, result: payload)
+        }
+
+        action.status = result.isError ? .failed : .succeeded
+        action.resultJSON = result.resultJSON
+        action.resultSummary = result.summary
+        if result.isError { action.error = result.summary }
+        action.completedAt = Date()
+        try? engine.store.save(action)
+        engine.collaboration.enqueueMissionAction(action)
+
+        onToolFinished?(toolName, result)
+
+        let payload: [String: Any] = [
+            "content": [["type": "text", "text": result.resultJSON]],
+            "isError": result.isError,
+        ]
+        return jsonRPCResult(id: rpcID, result: payload)
+    }
+
+    private func serializeArgs(_ args: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]),
+            let s = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return s
+    }
+
+    private func jsonRPCResult(id: Any?, result: [String: Any]) -> HTTPResponse {
+        var payload: [String: Any] = ["jsonrpc": "2.0", "result": result]
+        if let id { payload["id"] = id }
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        return HTTPResponse(status: 200, body: body, contentType: "application/json")
+    }
+
+    private func jsonRPCError(id: Any?, code: Int, message: String) -> HTTPResponse {
+        var payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "error": ["code": code, "message": message],
+        ]
+        if let id { payload["id"] = id }
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        return HTTPResponse(status: 200, body: body, contentType: "application/json")
+    }
+
+    private func idString(_ raw: Any?) -> String? {
+        if let s = raw as? String { return s }
+        if let i = raw as? Int { return String(i) }
+        return nil
+    }
+}
+
+public enum MCPServerError: Error {
+    case listenerFailed(String)
+}
+
+private struct HTTPResponse {
+    let status: Int
+    let body: Data
+    let contentType: String
+}
+
+private struct ParsedRequest {
+    let method: String
+    let path: String
+    let body: Data
+}
+
+private func parseHTTPRequest(_ buffer: Data) -> ParsedRequest? {
+    guard let separator = "\r\n\r\n".data(using: .utf8),
+        let headerEnd = buffer.range(of: separator)
+    else { return nil }
+    let headerData = buffer[..<headerEnd.lowerBound]
+    guard let header = String(data: headerData, encoding: .utf8) else { return nil }
+    let lines = header.components(separatedBy: "\r\n")
+    guard let requestLine = lines.first else { return nil }
+    let parts = requestLine.split(separator: " ", maxSplits: 2).map(String.init)
+    guard parts.count >= 2 else { return nil }
+    let method = parts[0]
+    let path = parts[1]
+
+    var contentLength: Int = 0
+    for line in lines.dropFirst() {
+        if let colon = line.firstIndex(of: ":") {
+            let name = line[..<colon].lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if name == "content-length", let n = Int(value) {
+                contentLength = n
+            }
+        }
+    }
+
+    let bodyStart = headerEnd.upperBound
+    let available = buffer.count - bodyStart
+    guard available >= contentLength else { return nil }
+    let body = Data(buffer[bodyStart..<(bodyStart + contentLength)])
+    return ParsedRequest(method: method, path: path, body: body)
+}
+
+private func encodeHTTPResponse(_ response: HTTPResponse) -> Data {
+    let reason: String
+    switch response.status {
+    case 200: reason = "OK"
+    case 204: reason = "No Content"
+    case 400: reason = "Bad Request"
+    case 405: reason = "Method Not Allowed"
+    case 500: reason = "Internal Server Error"
+    default: reason = "Status"
+    }
+    var head = "HTTP/1.1 \(response.status) \(reason)\r\n"
+    head += "Content-Type: \(response.contentType)\r\n"
+    head += "Content-Length: \(response.body.count)\r\n"
+    head += "Connection: close\r\n"
+    head += "\r\n"
+    var data = Data(head.utf8)
+    data.append(response.body)
+    return data
+}
+
+private final class ResumeFlag: @unchecked Sendable {
+    private var done = false
+    private let lock = NSLock()
+    func flip() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return true }
+        done = true
+        return false
+    }
+    func unflip() {
+        lock.lock(); defer { lock.unlock() }
+        done = false
+    }
+}

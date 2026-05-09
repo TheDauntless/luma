@@ -172,6 +172,7 @@ public final class Engine {
         llmRegistry.register(AnthropicProvider())
         llmRegistry.register(OpenAIProvider())
         llmRegistry.register(LocalOpenAICompatibleProvider())
+        llmRegistry.register(ClaudeCodeProvider(engine: self))
         MissionTools.registerStandard(in: missionTools, engine: self)
         missionsObservation = store.observeMissions { [weak self] missions in
             Task { @MainActor in self?.missions = missions }
