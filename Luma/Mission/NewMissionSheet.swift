@@ -7,16 +7,29 @@ struct NewMissionSheet: View {
     var onCreated: (Mission) -> Void
 
     @State private var goalText: String = ""
-    @State private var selectedProviderID: String = AnthropicProvider.providerID
-    @State private var selectedModelID: String = "claude-sonnet-4-6"
-    @State private var tokenBudgetInput: Int = 250_000
-    @State private var tokenBudgetOutput: Int = 32_000
-    @State private var thinkingEnabled: Bool = false
-    @State private var thinkingBudget: Int = 4_096
+    @State private var selectedProviderID: String
+    @State private var selectedModelID: String
+    @State private var tokenBudgetInput: Int
+    @State private var tokenBudgetOutput: Int
+    @State private var thinkingEnabled: Bool
+    @State private var thinkingBudget: Int
     @State private var apiKey: String = ""
     @State private var hasStoredAPIKey: Bool = false
     @State private var checkingAPIKey: Bool = true
     @State private var isStarting = false
+
+    init(workspace: Workspace, isPresented: Binding<Bool>, onCreated: @escaping (Mission) -> Void) {
+        self.workspace = workspace
+        self._isPresented = isPresented
+        self.onCreated = onCreated
+        let state = workspace.projectUIState
+        self._selectedProviderID = State(initialValue: state.lastMissionProviderID)
+        self._selectedModelID = State(initialValue: state.lastMissionModelID)
+        self._tokenBudgetInput = State(initialValue: state.lastMissionTokenBudgetInput)
+        self._tokenBudgetOutput = State(initialValue: state.lastMissionTokenBudgetOutput)
+        self._thinkingEnabled = State(initialValue: state.lastMissionThinkingEnabled)
+        self._thinkingBudget = State(initialValue: state.lastMissionThinkingBudget)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -144,6 +157,8 @@ struct NewMissionSheet: View {
             try? await workspace.engine.llmCredentials.setAPIKey(apiKey, providerID: selectedProviderID)
         }
 
+        rememberDefaults()
+
         let mission = workspace.engine.startMission(
             goal: goalText,
             providerID: selectedProviderID,
@@ -156,6 +171,18 @@ struct NewMissionSheet: View {
             onCreated(mission)
             isPresented = false
         }
+    }
+
+    private func rememberDefaults() {
+        var state = workspace.projectUIState
+        state.lastMissionProviderID = selectedProviderID
+        state.lastMissionModelID = selectedModelID
+        state.lastMissionTokenBudgetInput = tokenBudgetInput
+        state.lastMissionTokenBudgetOutput = tokenBudgetOutput
+        state.lastMissionThinkingEnabled = thinkingEnabled
+        state.lastMissionThinkingBudget = thinkingBudget
+        workspace.projectUIState = state
+        try? workspace.store.save(state)
     }
 }
 
