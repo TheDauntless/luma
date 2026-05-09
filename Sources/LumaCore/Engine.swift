@@ -18,11 +18,14 @@ public final class Engine {
     public let llmCredentials: LLMCredentialStore
     public let missionTools: ToolCatalog
     private let missionExecutor: MissionExecutor
+
+    #if canImport(Network)
     private var activeMCPServersByMissionID: [UUID: MCPServer] = [:]
 
     public private(set) var externalMCPServer: MCPServer?
     public private(set) var externalMCPURL: URL?
     public private(set) var externalMCPMissionID: UUID?
+    #endif
 
     private let _events = AsyncEventSource<RuntimeEvent>()
     public var events: AsyncStream<RuntimeEvent> { _events.makeStream() }
@@ -3149,6 +3152,7 @@ public final class Engine {
         missionExecutor.liveDeltaSink = sink
     }
 
+    #if canImport(Network)
     public func registerActiveMCPServer(_ server: MCPServer, for missionID: UUID) {
         activeMCPServersByMissionID[missionID] = server
     }
@@ -3230,6 +3234,8 @@ public final class Engine {
         }
         return nil
     }
+
+    #endif
 
     private static let externalMCPCredentialService = "luma.mcp.external"
     private static let externalMCPCredentialAccount = "default"
@@ -3316,10 +3322,12 @@ public final class Engine {
             let mission = try? store.fetchMission(id: action.missionID)
         else { return }
 
+        #if canImport(Network)
         if let server = activeMCPServersByMissionID[action.missionID] {
             server.approve(actionID: actionID)
             return
         }
+        #endif
 
         var approved = action
         approved.status = .approved
@@ -3361,10 +3369,12 @@ public final class Engine {
             action.status == .pending
         else { return }
 
+        #if canImport(Network)
         if let server = activeMCPServersByMissionID[action.missionID] {
             server.reject(actionID: actionID, reason: reason)
             return
         }
+        #endif
 
         action.status = .rejected
         action.decidedAt = Date()

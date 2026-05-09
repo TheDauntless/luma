@@ -1,3 +1,4 @@
+#if canImport(Network)
 import Foundation
 import Network
 
@@ -160,9 +161,10 @@ public final class MCPServer {
 
         switch rpcMethod {
         case "initialize":
+            let clientVersion = (params["protocolVersion"] as? String) ?? "2025-06-18"
             return jsonRPCResult(id: rpcID, result: [
-                "protocolVersion": "2025-06-18",
-                "capabilities": ["tools": [String: Any]()],
+                "protocolVersion": clientVersion,
+                "capabilities": ["tools": ["listChanged": false] as [String: Any]],
                 "serverInfo": ["name": "luma", "version": "1"],
             ])
 
@@ -418,3 +420,6 @@ private final class ResumeFlag: @unchecked Sendable {
         done = false
     }
 }
+
+#endif
+

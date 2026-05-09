@@ -90,6 +90,7 @@ public final class ClaudeCodeProvider: LLMProvider {
             arguments.append(contentsOf: ["--model", request.modelID])
         }
 
+        #if canImport(Network)
         if let mission = request.mission, let engine, !request.tools.isEmpty {
             let toolNames = request.tools.map(\.name)
             let server = MCPServer(engine: engine, mission: mission, toolNames: toolNames)
@@ -121,6 +122,10 @@ public final class ClaudeCodeProvider: LLMProvider {
         } else {
             arguments.append(contentsOf: ["--allowed-tools", ""])
         }
+        #else
+        _ = mcpHandle
+        arguments.append(contentsOf: ["--allowed-tools", ""])
+        #endif
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = arguments
@@ -297,6 +302,7 @@ public final class ClaudeCodeProvider: LLMProvider {
 }
 
 private actor MCPServerHandle {
+    #if canImport(Network)
     private var server: MCPServer?
     private var missionID: UUID?
     private weak var engine: Engine?
@@ -317,6 +323,9 @@ private actor MCPServerHandle {
         self.missionID = nil
         self.engine = nil
     }
+    #else
+    func stop() async {}
+    #endif
 }
 
 private func formatArgs(_ args: [String: Any]) -> String {
