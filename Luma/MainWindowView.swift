@@ -82,7 +82,7 @@ struct MainWindowView: View {
             Text("You're a member of this lab. Ask an owner to promote you before starting a session.")
         }
         .frame(
-            minWidth: 800,
+            minWidth: 900,
             idealWidth: 1100,
             maxWidth: .infinity,
             minHeight: 600,
@@ -161,7 +161,7 @@ struct MainWindowView: View {
                 workspace: workspace,
                 selection: selection
             )
-            .navigationSplitViewColumnWidth(ideal: 220)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
         } detail: {
             DetailView(
                 workspace: workspace,

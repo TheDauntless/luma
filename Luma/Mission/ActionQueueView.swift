@@ -11,11 +11,18 @@ struct ActionQueueView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "tray.full")
-                Text("Action Queue").font(.headline)
-                Spacer()
-                Text("\(actions.count) pending").font(.caption).foregroundStyle(.secondary)
+                Text("Action Queue")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                Text("\(actions.count) pending")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
             }
             .padding()
 

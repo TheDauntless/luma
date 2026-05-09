@@ -8,11 +8,18 @@ struct FindingsListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: "checkmark.seal")
-                Text("Findings").font(.headline)
-                Spacer()
-                Text("\(findings.count)").font(.caption).foregroundStyle(.secondary)
+                Text("Findings")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                Text("\(findings.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
             }
             .padding()
 
