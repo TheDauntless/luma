@@ -122,7 +122,7 @@ public enum MissionTools {
     private static func registerAttachToProcess(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "attach_to_process",
-            description: "Attach Frida to an already-running process by pid. Creates a new session that future tools can target. Requires user approval.",
+            description: "Attach Frida to an already-running process by pid. Idempotent: if a session for the same device and pid already exists, the existing session is reused (re-attaching when needed) instead of creating a duplicate. Requires user approval.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"device_id":{"type":"string"},"pid":{"type":"integer","minimum":1}},"required":["device_id","pid"],"additionalProperties":false}
                 """,
@@ -146,6 +146,9 @@ public enum MissionTools {
                 let processes = try await device.enumerateProcesses(pids: [pid], scope: .full)
                 guard let process = processes.first else {
                     return errorResult("pid \(pid) not found on \(device.name)")
+                }
+                if let existing = findExistingAttach(in: engine, deviceID: device.id, pid: pid) {
+                    return await reuseAttachSession(existing, engine: engine, device: device, process: process)
                 }
                 let session = ProcessSession(
                     kind: .attach,
@@ -173,7 +176,7 @@ public enum MissionTools {
     private static func registerSpawnProcess(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "spawn_process",
-            description: "Spawn a process under Frida and attach. target_kind=program takes a 'path'; target_kind=application takes an 'identifier' (bundle ID on Apple, package name on Android). auto_resume defaults to true. Requires user approval.",
+            description: "Spawn a process under Frida and attach. target_kind=program takes a 'path'; target_kind=application takes an 'identifier' (bundle ID on Apple, package name on Android). auto_resume defaults to true. Idempotent: if a session for the same device and target already exists, the existing session is reused (re-spawning when needed) instead of creating a duplicate. Requires user approval.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"device_id":{"type":"string"},"target_kind":{"type":"string","enum":["program","application"]},"path":{"type":"string"},"identifier":{"type":"string"},"name":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"environment":{"type":"object","additionalProperties":{"type":"string"}},"working_directory":{"type":"string"},"auto_resume":{"type":"boolean","default":true}},"required":["device_id","target_kind"],"additionalProperties":false}
                 """,
@@ -223,6 +226,9 @@ public enum MissionTools {
                 stdio: .inherit,
                 autoResume: autoResume
             )
+            if let existing = findExistingSpawn(in: engine, deviceID: device.id, target: target) {
+                return await reuseSpawnSession(existing, engine: engine, device: device, config: config)
+            }
             let session = ProcessSession(
                 kind: .spawn(config),
                 deviceID: device.id,
@@ -239,6 +245,59 @@ public enum MissionTools {
                 "auto_resume": autoResume,
             ]
             return makeResult(jsonObject: payload, summary: "Spawned \(config.defaultDisplayName) on \(device.name)")
+        }
+    }
+
+    private static func findExistingAttach(in engine: Engine, deviceID: String, pid: UInt) -> ProcessSession? {
+        engine.sessions.first { session in
+            guard case .attach = session.kind else { return false }
+            return session.deviceID == deviceID && session.lastKnownPID == pid
+        }
+    }
+
+    private static func reuseAttachSession(_ session: ProcessSession, engine: Engine, device: Device, process: ProcessDetails) async -> ActionResult {
+        let payload: [String: Any] = [
+            "session_id": session.id.uuidString,
+            "process_name": process.name,
+            "pid": process.pid,
+            "reused": true,
+        ]
+        if engine.node(forSessionID: session.id) != nil {
+            return makeResult(jsonObject: payload, summary: "Already attached to \(process.name) (pid \(process.pid)) on \(device.name)")
+        }
+        await engine.attach(device: device, process: process, session: session)
+        return makeResult(jsonObject: payload, summary: "Re-attached to \(process.name) (pid \(process.pid)) on \(device.name)")
+    }
+
+    private static func findExistingSpawn(in engine: Engine, deviceID: String, target: SpawnConfig.Target) -> ProcessSession? {
+        engine.sessions.first { session in
+            guard case .spawn(let cfg) = session.kind else { return false }
+            return session.deviceID == deviceID && spawnTargetsMatch(cfg.target, target)
+        }
+    }
+
+    private static func reuseSpawnSession(_ session: ProcessSession, engine: Engine, device: Device, config: SpawnConfig) async -> ActionResult {
+        let payload: [String: Any] = [
+            "session_id": session.id.uuidString,
+            "process_name": session.processName,
+            "auto_resume": config.autoResume,
+            "reused": true,
+        ]
+        if engine.node(forSessionID: session.id) != nil {
+            return makeResult(jsonObject: payload, summary: "Already attached to \(session.processName) on \(device.name)")
+        }
+        await engine.spawnAndAttach(device: device, session: session)
+        return makeResult(jsonObject: payload, summary: "Re-spawned \(session.processName) on \(device.name)")
+    }
+
+    private static func spawnTargetsMatch(_ a: SpawnConfig.Target, _ b: SpawnConfig.Target) -> Bool {
+        switch (a, b) {
+        case (.program(let p1), .program(let p2)):
+            return p1 == p2
+        case (.application(let id1, _), .application(let id2, _)):
+            return id1 == id2
+        default:
+            return false
         }
     }
 
