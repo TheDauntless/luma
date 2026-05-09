@@ -13,7 +13,6 @@ struct NewMissionSheet: View {
     @State private var tokenBudgetOutput: Int = 32_000
     @State private var thinkingEnabled: Bool = false
     @State private var thinkingBudget: Int = 4_096
-    @State private var selectedSessionIDs: Set<UUID> = []
     @State private var apiKey: String = ""
     @State private var hasStoredAPIKey: Bool = false
     @State private var checkingAPIKey: Bool = true
@@ -67,27 +66,6 @@ struct NewMissionSheet: View {
                         Stepper("Thinking budget: \(thinkingBudget)", value: $thinkingBudget, in: 1_024...32_000, step: 1_024)
                     }
                 }
-
-                Section("Targets") {
-                    if workspace.engine.sessions.isEmpty {
-                        Text("No attached sessions. Attach to a process first.").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(workspace.engine.sessions) { session in
-                            Toggle(isOn: Binding(
-                                get: { selectedSessionIDs.contains(session.id) },
-                                set: { isOn in
-                                    if isOn { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) }
-                                }
-                            )) {
-                                VStack(alignment: .leading) {
-                                    Text(session.processName).font(.body)
-                                    Text("\(session.deviceName) · pid \(String(session.lastKnownPID))")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             .formStyle(.grouped)
 
@@ -112,7 +90,6 @@ struct NewMissionSheet: View {
 
     private var canStart: Bool {
         !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !selectedSessionIDs.isEmpty
             && !isStarting
             && (hasStoredAPIKey || !apiKey.isEmpty)
     }
@@ -144,7 +121,6 @@ struct NewMissionSheet: View {
             goal: goalText,
             providerID: selectedProviderID,
             modelID: selectedModelID,
-            targetSessionIDs: Array(selectedSessionIDs),
             tokenBudgetInput: tokenBudgetInput,
             tokenBudgetOutput: tokenBudgetOutput,
             thinkingBudget: thinkingEnabled ? thinkingBudget : 0

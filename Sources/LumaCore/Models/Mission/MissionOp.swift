@@ -3,8 +3,6 @@ import Foundation
 public enum MissionOp: Sendable {
     case missionUpsert(MissionUpsert)
     case missionRemove(MissionRemove)
-    case targetUpsert(TargetUpsert)
-    case targetRemove(TargetRemove)
     case turnAppend(TurnAppend)
     case actionUpsert(ActionUpsert)
     case findingUpsert(FindingUpsert)
@@ -15,8 +13,6 @@ public enum MissionOp: Sendable {
         switch self {
         case .missionUpsert(let u): return u.opID
         case .missionRemove(let r): return r.opID
-        case .targetUpsert(let u): return u.opID
-        case .targetRemove(let r): return r.opID
         case .turnAppend(let a): return a.opID
         case .actionUpsert(let u): return u.opID
         case .findingUpsert(let u): return u.opID
@@ -29,8 +25,6 @@ public enum MissionOp: Sendable {
         switch self {
         case .missionUpsert(let u): return u.mission.id
         case .missionRemove(let r): return r.missionID
-        case .targetUpsert(let u): return u.target.missionID
-        case .targetRemove(let r): return r.target.missionID
         case .turnAppend(let a): return a.turn.missionID
         case .actionUpsert(let u): return u.action.missionID
         case .findingUpsert(let u): return u.finding.missionID
@@ -43,8 +37,6 @@ public enum MissionOp: Sendable {
         switch self {
         case .missionUpsert: return "mission_upsert"
         case .missionRemove: return "mission_remove"
-        case .targetUpsert: return "target_upsert"
-        case .targetRemove: return "target_remove"
         case .turnAppend: return "turn_append"
         case .actionUpsert: return "action_upsert"
         case .findingUpsert: return "finding_upsert"
@@ -70,26 +62,6 @@ public enum MissionOp: Sendable {
         public init(opID: UUID = UUID(), missionID: UUID) {
             self.opID = opID
             self.missionID = missionID
-        }
-    }
-
-    public struct TargetUpsert: Sendable {
-        public let opID: UUID
-        public let target: MissionTarget
-
-        public init(opID: UUID = UUID(), target: MissionTarget) {
-            self.opID = opID
-            self.target = target
-        }
-    }
-
-    public struct TargetRemove: Sendable {
-        public let opID: UUID
-        public let target: MissionTarget
-
-        public init(opID: UUID = UUID(), target: MissionTarget) {
-            self.opID = opID
-            self.target = target
         }
     }
 
@@ -157,10 +129,6 @@ public enum MissionOp: Sendable {
             obj["mission"] = encodeRow(u.mission)
         case .missionRemove(let r):
             obj["mission_id"] = r.missionID.uuidString
-        case .targetUpsert(let u):
-            obj["target"] = encodeRow(u.target)
-        case .targetRemove(let r):
-            obj["target"] = encodeRow(r.target)
         case .turnAppend(let a):
             obj["turn"] = encodeRow(a.turn)
         case .actionUpsert(let u):
@@ -194,16 +162,6 @@ public enum MissionOp: Sendable {
                 let id = UUID(uuidString: idStr)
             else { return nil }
             return .missionRemove(MissionRemove(opID: opID, missionID: id))
-        case "target_upsert":
-            guard let row = obj["target"] as? [String: Any],
-                let t: MissionTarget = decodeRow(row)
-            else { return nil }
-            return .targetUpsert(TargetUpsert(opID: opID, target: t))
-        case "target_remove":
-            guard let row = obj["target"] as? [String: Any],
-                let t: MissionTarget = decodeRow(row)
-            else { return nil }
-            return .targetRemove(TargetRemove(opID: opID, target: t))
         case "turn_append":
             guard let row = obj["turn"] as? [String: Any],
                 let t: MissionTurn = decodeRow(row)

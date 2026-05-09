@@ -113,7 +113,6 @@ public final class Engine {
         self.llmRegistry = registry
         self.llmCredentials = credentials
         self.missionTools = catalog
-        let promptStore = store
         self.missionExecutor = MissionExecutor(
             store: store,
             registry: registry,
@@ -121,9 +120,7 @@ public final class Engine {
             catalog: catalog,
             collaboration: collaboration,
             systemPromptBuilder: { mission in
-                let targets = (try? promptStore.fetchMissionTargets(missionID: mission.id)) ?? []
-                let sessions = targets.compactMap { try? promptStore.fetchSession(id: $0.sessionID) }
-                return MissionSystemPrompt.build(for: mission, targets: sessions)
+                MissionSystemPrompt.build(for: mission)
             }
         )
 
@@ -3151,7 +3148,6 @@ public final class Engine {
         goal: String,
         providerID: String,
         modelID: String,
-        targetSessionIDs: [UUID],
         tokenBudgetInput: Int,
         tokenBudgetOutput: Int,
         thinkingBudget: Int = 0,
@@ -3169,11 +3165,6 @@ public final class Engine {
         do {
             try store.save(mission)
             collaboration.enqueueMissionUpsert(mission)
-            for sid in targetSessionIDs {
-                let target = MissionTarget(missionID: mission.id, sessionID: sid)
-                try store.save(target)
-                collaboration.enqueueMissionTargetUpsert(target)
-            }
         } catch {
             return nil
         }
@@ -3280,7 +3271,6 @@ public final class Engine {
             try? store.deleteMission(id: stale.id)
         }
         for mission in snapshot.missions { try? store.save(mission) }
-        for target in snapshot.targets { try? store.save(target) }
         for turn in snapshot.turns { try? store.save(turn) }
         for action in snapshot.actions { try? store.save(action) }
         for finding in snapshot.findings { try? store.save(finding) }
@@ -3293,10 +3283,6 @@ public final class Engine {
             try? store.save(u.mission)
         case .missionRemove(let r):
             try? store.deleteMission(id: r.missionID)
-        case .targetUpsert(let u):
-            try? store.save(u.target)
-        case .targetRemove(let r):
-            try? store.deleteMissionTarget(missionID: r.target.missionID, sessionID: r.target.sessionID)
         case .turnAppend(let a):
             try? store.save(a.turn)
         case .actionUpsert(let u):

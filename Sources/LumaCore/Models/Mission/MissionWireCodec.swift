@@ -21,11 +21,6 @@ extension Mission {
     public static func fromWireJSON(_ obj: [String: Any]) -> Mission? { decodeMissionEntity(obj) }
 }
 
-extension MissionTarget {
-    public func toWireJSON() -> [String: Any]? { encodeMissionEntity(self) }
-    public static func fromWireJSON(_ obj: [String: Any]) -> MissionTarget? { decodeMissionEntity(obj) }
-}
-
 extension MissionTurn {
     public func toWireJSON() -> [String: Any]? { encodeMissionEntity(self) }
     public static func fromWireJSON(_ obj: [String: Any]) -> MissionTurn? { decodeMissionEntity(obj) }

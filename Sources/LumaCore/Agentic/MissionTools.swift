@@ -1,4 +1,5 @@
 import Foundation
+import Frida
 
 @MainActor
 public enum MissionTools {
@@ -7,7 +8,11 @@ public enum MissionTools {
     public static let requestUserInputToolName = "request_user_input"
 
     public static func registerStandard(in catalog: ToolCatalog, engine: Engine) {
+        registerListDevices(in: catalog, engine: engine)
+        registerListProcesses(in: catalog, engine: engine)
         registerListSessions(in: catalog, engine: engine)
+        registerAttachToProcess(in: catalog, engine: engine)
+        registerSpawnProcess(in: catalog, engine: engine)
         registerListModules(in: catalog, engine: engine)
         registerSummarizeRecentEvents(in: catalog, engine: engine)
         registerResolveSymbol(in: catalog, engine: engine)
@@ -20,6 +25,67 @@ public enum MissionTools {
         registerEvalREPL(in: catalog, engine: engine)
         registerPinAsInsight(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
+    }
+
+    // MARK: - list_devices
+
+    private static func registerListDevices(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_devices",
+            description: "List devices reachable to Frida (local, USB-attached, network). Use when no existing session fits the goal and you need to find a target.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{},"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] _ in
+            guard let engine else { return errorResult("engine unavailable") }
+            let devices = await engine.deviceManager.currentDevices()
+            let array: [[String: Any]] = devices.map { d in
+                [
+                    "id": d.id,
+                    "name": d.name,
+                    "kind": String(describing: d.kind),
+                    "is_lost": d.isLost,
+                ]
+            }
+            return makeResult(jsonObject: array, summary: "Listed \(devices.count) device\(devices.count == 1 ? "" : "s")")
+        }
+    }
+
+    // MARK: - list_processes
+
+    private static func registerListProcesses(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_processes",
+            description: "List running processes on a Frida device. Use after list_devices when looking for a pid to attach to.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"device_id":{"type":"string"},"scope":{"type":"string","enum":["minimal","metadata","full"],"default":"minimal","description":"metadata adds parameters; full also adds icons (slower)"}},"required":["device_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let deviceID = invocation.args["device_id"] as? String else {
+                return errorResult("missing device_id")
+            }
+            let devices = await engine.deviceManager.currentDevices()
+            guard let device = devices.first(where: { $0.id == deviceID }) else {
+                return errorResult("no device with id \(deviceID)")
+            }
+            let scope = parseProcessScope(invocation.args["scope"] as? String)
+            do {
+                let processes = try await device.enumerateProcesses(scope: scope)
+                let array: [[String: Any]] = processes.map { p in
+                    ["pid": p.pid, "name": p.name]
+                }
+                return makeResult(jsonObject: array, summary: "Found \(processes.count) process\(processes.count == 1 ? "" : "es") on \(device.name)")
+            } catch {
+                return errorResult("enumerate failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - list_sessions
@@ -48,6 +114,131 @@ public enum MissionTools {
                 ]
             }
             return makeResult(jsonObject: array, summary: "Found \(sessions.count) session\(sessions.count == 1 ? "" : "s")")
+        }
+    }
+
+    // MARK: - attach_to_process (act)
+
+    private static func registerAttachToProcess(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "attach_to_process",
+            description: "Attach Frida to an already-running process by pid. Creates a new session that future tools can target. Requires user approval.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"device_id":{"type":"string"},"pid":{"type":"integer","minimum":1}},"required":["device_id","pid"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let deviceID = invocation.args["device_id"] as? String else {
+                return errorResult("missing device_id")
+            }
+            guard let pidNumber = invocation.args["pid"] as? Int, pidNumber > 0 else {
+                return errorResult("missing or invalid pid")
+            }
+            let pid = UInt(pidNumber)
+            let devices = await engine.deviceManager.currentDevices()
+            guard let device = devices.first(where: { $0.id == deviceID }) else {
+                return errorResult("no device with id \(deviceID)")
+            }
+            do {
+                let processes = try await device.enumerateProcesses(pids: [pid], scope: .full)
+                guard let process = processes.first else {
+                    return errorResult("pid \(pid) not found on \(device.name)")
+                }
+                let session = ProcessSession(
+                    kind: .attach,
+                    deviceID: device.id,
+                    deviceName: device.name,
+                    processName: process.name,
+                    lastKnownPID: pid
+                )
+                try? engine.store.save(session)
+                await engine.attach(device: device, process: process, session: session)
+                let payload: [String: Any] = [
+                    "session_id": session.id.uuidString,
+                    "process_name": process.name,
+                    "pid": pid,
+                ]
+                return makeResult(jsonObject: payload, summary: "Attached to \(process.name) (pid \(pid)) on \(device.name)")
+            } catch {
+                return errorResult("attach failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - spawn_process (act)
+
+    private static func registerSpawnProcess(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "spawn_process",
+            description: "Spawn a process under Frida and attach. target_kind=program takes a 'path'; target_kind=application takes an 'identifier' (bundle ID on Apple, package name on Android). auto_resume defaults to true. Requires user approval.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"device_id":{"type":"string"},"target_kind":{"type":"string","enum":["program","application"]},"path":{"type":"string"},"identifier":{"type":"string"},"name":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"environment":{"type":"object","additionalProperties":{"type":"string"}},"working_directory":{"type":"string"},"auto_resume":{"type":"boolean","default":true}},"required":["device_id","target_kind"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let deviceID = invocation.args["device_id"] as? String else {
+                return errorResult("missing device_id")
+            }
+            let devices = await engine.deviceManager.currentDevices()
+            guard let device = devices.first(where: { $0.id == deviceID }) else {
+                return errorResult("no device with id \(deviceID)")
+            }
+            guard let kind = invocation.args["target_kind"] as? String else {
+                return errorResult("missing target_kind")
+            }
+
+            let target: SpawnConfig.Target
+            switch kind {
+            case "program":
+                guard let path = invocation.args["path"] as? String, !path.isEmpty else {
+                    return errorResult("program target requires non-empty 'path'")
+                }
+                target = .program(path: path)
+            case "application":
+                guard let identifier = invocation.args["identifier"] as? String, !identifier.isEmpty else {
+                    return errorResult("application target requires non-empty 'identifier'")
+                }
+                let displayName = (invocation.args["name"] as? String) ?? identifier
+                target = .application(identifier: identifier, name: displayName)
+            default:
+                return errorResult("unknown target_kind: \(kind)")
+            }
+
+            let arguments = (invocation.args["arguments"] as? [String]) ?? []
+            let environment = (invocation.args["environment"] as? [String: String]) ?? [:]
+            let workingDirectory = invocation.args["working_directory"] as? String
+            let autoResume = (invocation.args["auto_resume"] as? Bool) ?? true
+
+            let config = SpawnConfig(
+                target: target,
+                arguments: arguments,
+                environment: environment,
+                workingDirectory: workingDirectory,
+                stdio: .inherit,
+                autoResume: autoResume
+            )
+            let session = ProcessSession(
+                kind: .spawn(config),
+                deviceID: device.id,
+                deviceName: device.name,
+                processName: config.defaultDisplayName,
+                lastKnownPID: 0
+            )
+            try? engine.store.save(session)
+            await engine.spawnAndAttach(device: device, session: session)
+
+            let payload: [String: Any] = [
+                "session_id": session.id.uuidString,
+                "process_name": config.defaultDisplayName,
+                "auto_resume": autoResume,
+            ]
+            return makeResult(jsonObject: payload, summary: "Spawned \(config.defaultDisplayName) on \(device.name)")
         }
     }
 
@@ -616,6 +807,14 @@ public enum MissionTools {
     private static func parseSessionID(_ args: [String: Any]) -> UUID? {
         guard let str = args["session_id"] as? String else { return nil }
         return UUID(uuidString: str)
+    }
+
+    private static func parseProcessScope(_ raw: String?) -> Scope {
+        switch raw {
+        case "metadata": return .metadata
+        case "full": return .full
+        default: return .minimal
+        }
     }
 
     private static func parseHexAddress(_ s: String) -> UInt64? {

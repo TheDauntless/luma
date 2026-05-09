@@ -524,28 +524,6 @@ public final class ProjectStore: Sendable {
         }
     }
 
-    public func fetchMissionTargets(missionID: UUID) throws -> [MissionTarget] {
-        try db.read { db in
-            try MissionTarget
-                .filter(Column("mission_id") == missionID)
-                .fetchAll(db)
-        }
-    }
-
-    public func save(_ target: MissionTarget) throws {
-        try db.write { db in
-            try target.save(db)
-        }
-    }
-
-    public func deleteMissionTarget(missionID: UUID, sessionID: UUID) throws {
-        try db.write { db in
-            _ = try MissionTarget
-                .filter(Column("mission_id") == missionID && Column("session_id") == sessionID)
-                .deleteAll(db)
-        }
-    }
-
     public func fetchMissionTurns(missionID: UUID) throws -> [MissionTurn] {
         try db.read { db in
             try MissionTurn
@@ -1052,14 +1030,6 @@ public final class ProjectStore: Sendable {
             t.column("cache_create_tokens", .integer).notNull().defaults(to: 0)
             t.column("thinking_budget", .integer).notNull().defaults(to: 0)
             t.column("temperature", .double)
-        }
-
-        try db.create(table: "mission_target", ifNotExists: true) { t in
-            t.column("mission_id", .text).notNull()
-                .references("mission", onDelete: .cascade)
-            t.column("session_id", .text).notNull()
-                .references("process_session", onDelete: .cascade)
-            t.primaryKey(["mission_id", "session_id"])
         }
 
         try db.create(table: "mission_turn", ifNotExists: true) { t in

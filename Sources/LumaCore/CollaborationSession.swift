@@ -482,10 +482,6 @@ public final class CollaborationSession {
         enqueueMissionOp(.missionRemove(.init(missionID: missionID)))
     }
 
-    public func enqueueMissionTargetUpsert(_ target: MissionTarget) {
-        enqueueMissionOp(.targetUpsert(.init(target: target)))
-    }
-
     public func enqueueMissionTurn(_ turn: MissionTurn) {
         enqueueMissionOp(.turnAppend(.init(turn: turn)))
     }
@@ -1289,14 +1285,12 @@ public final class CollaborationSession {
         onCustomInstrumentSnapshot?(customDefs)
 
         let missionsArr = (payload["missions"] as? [JSONObject]) ?? []
-        let targetsArr = (payload["mission_targets"] as? [JSONObject]) ?? []
         let turnsArr = (payload["mission_turns"] as? [JSONObject]) ?? []
         let actionsArr = (payload["mission_actions"] as? [JSONObject]) ?? []
         let findingsArr = (payload["mission_findings"] as? [JSONObject]) ?? []
         let evidenceArr = (payload["mission_evidence"] as? [JSONObject]) ?? []
         let missionSnapshot = MissionSnapshot(
             missions: missionsArr.compactMap(Mission.fromWireJSON),
-            targets: targetsArr.compactMap(MissionTarget.fromWireJSON),
             turns: turnsArr.compactMap(MissionTurn.fromWireJSON),
             actions: actionsArr.compactMap(MissionAction.fromWireJSON),
             findings: findingsArr.compactMap(MissionFinding.fromWireJSON),
