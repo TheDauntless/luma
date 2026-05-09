@@ -61,7 +61,7 @@ private struct TurnCard: View {
     private var roleLabel: String {
         switch turn.role {
         case .assistant: return "Assistant"
-        case .user: return "Tool results"
+        case .user: return userTurnIsToolResults ? "Tool results" : "You"
         case .tool: return "Tool"
         }
     }
@@ -69,7 +69,7 @@ private struct TurnCard: View {
     private var roleIcon: String {
         switch turn.role {
         case .assistant: return "sparkles"
-        case .user: return "wrench.and.screwdriver"
+        case .user: return userTurnIsToolResults ? "wrench.and.screwdriver" : "person.fill"
         case .tool: return "terminal"
         }
     }
@@ -77,9 +77,16 @@ private struct TurnCard: View {
     private var roleColor: Color {
         switch turn.role {
         case .assistant: return .blue
-        case .user: return .gray
+        case .user: return userTurnIsToolResults ? .gray : .purple
         case .tool: return .orange
         }
+    }
+
+    private var userTurnIsToolResults: Bool {
+        for block in parsedBlocks {
+            if case .text = block.content { return false }
+        }
+        return true
     }
 
     private var parsedBlocks: [LLMContentBlock] {
