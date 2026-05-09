@@ -124,6 +124,7 @@ public final class ClaudeCodeProvider: LLMProvider {
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = arguments
+        process.environment = augmentedEnvironment()
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -265,6 +266,24 @@ public final class ClaudeCodeProvider: LLMProvider {
             if case .text(let t) = block.content { return t }
             return nil
         }.joined(separator: "\n\n")
+    }
+
+    private func augmentedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let inherited = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let candidates = [
+            NSString(string: "~/.local/bin").expandingTildeInPath,
+            NSString(string: "~/.npm-global/bin").expandingTildeInPath,
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+        ]
+        let inheritedSegments = inherited.split(separator: ":").map(String.init)
+        var seen = Set<String>(inheritedSegments)
+        var augmented = candidates.filter { !seen.contains($0) }
+        seen.formUnion(augmented)
+        augmented.append(contentsOf: inheritedSegments)
+        env["PATH"] = augmented.joined(separator: ":")
+        return env
     }
 
     private func decodeUsage(_ obj: [String: Any], prior: LLMUsage) -> LLMUsage {

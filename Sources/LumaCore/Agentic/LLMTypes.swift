@@ -198,13 +198,34 @@ public enum LLMTurnEvent: Sendable {
     case finalMessage(role: LLMRole, blocks: [LLMContentBlock])
 }
 
-public enum LLMProviderError: Error, Sendable {
+public enum LLMProviderError: LocalizedError, Sendable {
     case missingAPIKey
     case requestFailed(status: Int, message: String)
     case decodingFailed(String)
     case streamInterrupted
     case capabilityUnsupported(String)
     case cancelled
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "Provider requires an API key but none is configured."
+        case .requestFailed(let status, let message):
+            let trimmed = message.prefix(500)
+            if status >= 0 {
+                return "Provider request failed (status \(status)): \(trimmed)"
+            }
+            return "Provider request failed: \(trimmed)"
+        case .decodingFailed(let detail):
+            return "Provider response could not be decoded: \(detail)"
+        case .streamInterrupted:
+            return "Provider stream ended unexpectedly."
+        case .capabilityUnsupported(let detail):
+            return "Capability not supported: \(detail)"
+        case .cancelled:
+            return "Cancelled."
+        }
+    }
 }
 
 public struct LLMModelInfo: Sendable, Hashable, Codable {
