@@ -64,6 +64,10 @@ struct ExternalMCPSection: View {
                 Button("Copy MCP config JSON") {
                     copy(mcpConfigJSON(url: url, token: token))
                 }
+                Button("Rotate token") {
+                    Task { await rotate() }
+                }
+                .disabled(isToggling)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -94,6 +98,17 @@ struct ExternalMCPSection: View {
         defer { isToggling = false }
         await workspace.engine.disableExternalMCPServer()
         lastError = nil
+    }
+
+    private func rotate() async {
+        isToggling = true
+        defer { isToggling = false }
+        do {
+            _ = try await workspace.engine.rotateExternalMCPToken()
+            lastError = nil
+        } catch {
+            lastError = "could not rotate: \(error.localizedDescription)"
+        }
     }
 
     private func claudeMcpAddCommand(url: URL, token: String) -> String {

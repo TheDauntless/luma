@@ -3165,6 +3165,8 @@ public final class Engine {
             return ExternalMCPInfo(url: url, bearerToken: server.bearerToken, missionID: id)
         }
 
+        let token = try await loadOrMintExternalMCPToken()
+
         var mission = Mission(
             goalText: "External tool calls (via MCP)",
             providerID: "external",
@@ -3184,7 +3186,8 @@ public final class Engine {
                 guard let self, let id = self.externalMCPMissionID else { return nil }
                 return try? self.store.fetchMission(id: id)
             },
-            toolNames: toolNames
+            toolNames: toolNames,
+            bearerToken: token
         )
         let url = try await server.start()
         externalMCPServer = server
@@ -3208,6 +3211,39 @@ public final class Engine {
         externalMCPServer = nil
         externalMCPURL = nil
         externalMCPMissionID = nil
+    }
+
+    @discardableResult
+    public func rotateExternalMCPToken() async throws -> ExternalMCPInfo? {
+        let wasRunning = isExternalMCPRunning
+        if wasRunning {
+            await disableExternalMCPServer()
+        }
+        try? await llmCredentials.backing.delete(service: Self.externalMCPCredentialService, account: Self.externalMCPCredentialAccount)
+        if wasRunning {
+            return try await enableExternalMCPServer()
+        }
+        return nil
+    }
+
+    private static let externalMCPCredentialService = "luma.mcp.external"
+    private static let externalMCPCredentialAccount = "default"
+
+    private func loadOrMintExternalMCPToken() async throws -> String {
+        if let stored = try? await llmCredentials.backing.get(
+            service: Self.externalMCPCredentialService,
+            account: Self.externalMCPCredentialAccount
+        ), !stored.isEmpty {
+            return stored
+        }
+        let bytes = (0..<32).map { _ in UInt8.random(in: .min...UInt8.max) }
+        let token = Data(bytes).base64EncodedString()
+        try? await llmCredentials.backing.set(
+            service: Self.externalMCPCredentialService,
+            account: Self.externalMCPCredentialAccount,
+            token: token
+        )
+        return token
     }
 
     @discardableResult
