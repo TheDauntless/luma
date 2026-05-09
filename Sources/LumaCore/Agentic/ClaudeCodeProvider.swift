@@ -153,14 +153,8 @@ public final class ClaudeCodeProvider: LLMProvider {
         var assembledUsage = LLMUsage.zero
         var stopReason = LLMStopReason.endTurn
 
-        while true {
+        for await chunk in pipeChunks(stdoutHandle) {
             try Task.checkCancellation()
-            let chunk = stdoutHandle.availableData
-            if chunk.isEmpty {
-                if !process.isRunning { break }
-                try await Task.sleep(nanoseconds: 50_000_000)
-                continue
-            }
             buffer.append(chunk)
             while let nl = buffer.firstIndex(of: 0x0a) {
                 let lineData = buffer[..<nl]
@@ -326,6 +320,22 @@ private actor MCPServerHandle {
     #else
     func stop() async {}
     #endif
+}
+
+private func pipeChunks(_ handle: FileHandle) -> AsyncStream<Data> {
+    AsyncStream<Data> { continuation in
+        handle.readabilityHandler = { fh in
+            let data = fh.availableData
+            if data.isEmpty {
+                continuation.finish()
+            } else {
+                continuation.yield(data)
+            }
+        }
+        continuation.onTermination = { _ in
+            handle.readabilityHandler = nil
+        }
+    }
 }
 
 private func formatArgs(_ args: [String: Any]) -> String {
