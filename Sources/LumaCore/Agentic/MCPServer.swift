@@ -15,6 +15,7 @@ public final class MCPServer {
     private weak var engine: Engine?
     public let mission: Mission
     private let toolNames: Set<String>
+    public let bearerToken: String
 
     private var pendingApprovals: [UUID: CheckedContinuation<ApprovalDecision, Never>] = [:]
 
@@ -22,6 +23,8 @@ public final class MCPServer {
         self.engine = engine
         self.mission = mission
         self.toolNames = Set(toolNames)
+        let bytes = (0..<32).map { _ in UInt8.random(in: .min...UInt8.max) }
+        self.bearerToken = Data(bytes).base64EncodedString()
     }
 
     public func approve(actionID: UUID) {
@@ -102,7 +105,12 @@ public final class MCPServer {
             }
 
             Task { @MainActor in
-                let response = await self.dispatch(method: parsed.method, path: parsed.path, body: parsed.body)
+                let response = await self.dispatch(
+                    method: parsed.method,
+                    path: parsed.path,
+                    headers: parsed.headers,
+                    body: parsed.body
+                )
                 let bytes = encodeHTTPResponse(response)
                 conn.send(content: bytes, completion: .contentProcessed { _ in
                     conn.cancel()
@@ -111,9 +119,13 @@ public final class MCPServer {
         }
     }
 
-    private func dispatch(method: String, path: String, body: Data) async -> HTTPResponse {
+    private func dispatch(method: String, path: String, headers: [String: String], body: Data) async -> HTTPResponse {
         if method != "POST" {
             return HTTPResponse(status: 405, body: Data("Method Not Allowed".utf8), contentType: "text/plain")
+        }
+        let presented = headers["authorization"] ?? ""
+        if presented != "Bearer \(bearerToken)" {
+            return HTTPResponse(status: 401, body: Data("Unauthorized".utf8), contentType: "text/plain")
         }
         guard let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             return jsonRPCError(id: nil, code: -32_700, message: "parse error")
@@ -311,6 +323,7 @@ private struct HTTPResponse {
 private struct ParsedRequest {
     let method: String
     let path: String
+    let headers: [String: String]
     let body: Data
 }
 
@@ -327,22 +340,20 @@ private func parseHTTPRequest(_ buffer: Data) -> ParsedRequest? {
     let method = parts[0]
     let path = parts[1]
 
-    var contentLength: Int = 0
+    var headers: [String: String] = [:]
     for line in lines.dropFirst() {
-        if let colon = line.firstIndex(of: ":") {
-            let name = line[..<colon].lowercased()
-            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            if name == "content-length", let n = Int(value) {
-                contentLength = n
-            }
-        }
+        guard let colon = line.firstIndex(of: ":") else { continue }
+        let name = line[..<colon].lowercased()
+        let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        headers[String(name)] = value
     }
+    let contentLength = (headers["content-length"]).flatMap(Int.init) ?? 0
 
     let bodyStart = headerEnd.upperBound
     let available = buffer.count - bodyStart
     guard available >= contentLength else { return nil }
     let body = Data(buffer[bodyStart..<(bodyStart + contentLength)])
-    return ParsedRequest(method: method, path: path, body: body)
+    return ParsedRequest(method: method, path: path, headers: headers, body: body)
 }
 
 private func encodeHTTPResponse(_ response: HTTPResponse) -> Data {
@@ -351,6 +362,7 @@ private func encodeHTTPResponse(_ response: HTTPResponse) -> Data {
     case 200: reason = "OK"
     case 204: reason = "No Content"
     case 400: reason = "Bad Request"
+    case 401: reason = "Unauthorized"
     case 405: reason = "Method Not Allowed"
     case 500: reason = "Internal Server Error"
     default: reason = "Status"

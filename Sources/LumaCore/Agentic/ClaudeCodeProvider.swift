@@ -108,6 +108,7 @@ public final class ClaudeCodeProvider: LLMProvider {
                     Self.mcpServerName: [
                         "type": "http",
                         "url": url.absoluteString,
+                        "headers": ["Authorization": "Bearer \(server.bearerToken)"],
                     ],
                 ],
             ]
