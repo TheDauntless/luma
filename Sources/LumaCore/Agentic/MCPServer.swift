@@ -60,11 +60,20 @@ public final class MCPServer {
         case cancelled
     }
 
-    public func start() async throws -> URL {
+    public func start(preferredPort: UInt16? = nil) async throws -> URL {
+        if let preferredPort, let endpoint = NWEndpoint.Port(rawValue: preferredPort) {
+            if let url = try? await startListener(on: endpoint) {
+                return url
+            }
+        }
+        return try await startListener(on: .any)
+    }
+
+    private func startListener(on port: NWEndpoint.Port) async throws -> URL {
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
-        let listener = try NWListener(using: parameters, on: .any)
+        let listener = try NWListener(using: parameters, on: port)
         self.listener = listener
 
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<URL, Error>) in

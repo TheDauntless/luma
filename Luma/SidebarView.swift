@@ -147,7 +147,7 @@ private struct SidebarMissionRow: View {
             Text(mission.goalText.isEmpty ? "(untitled mission)" : mission.goalText)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .padding(.leading, subrowIconWidth)
         .accessibilityElement(children: .combine)

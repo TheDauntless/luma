@@ -3166,6 +3166,7 @@ public final class Engine {
         }
 
         let token = try await loadOrMintExternalMCPToken()
+        let preferredPort = await loadPreferredExternalMCPPort()
 
         var mission = Mission(
             goalText: "External tool calls (via MCP)",
@@ -3189,10 +3190,14 @@ public final class Engine {
             toolNames: toolNames,
             bearerToken: token
         )
-        let url = try await server.start()
+        let url = try await server.start(preferredPort: preferredPort)
         externalMCPServer = server
         externalMCPURL = url
         registerActiveMCPServer(server, for: mission.id)
+
+        if let port = url.port.flatMap({ UInt16(exactly: $0) }) {
+            await savePreferredExternalMCPPort(port)
+        }
 
         return ExternalMCPInfo(url: url, bearerToken: server.bearerToken, missionID: mission.id)
     }
@@ -3228,6 +3233,7 @@ public final class Engine {
 
     private static let externalMCPCredentialService = "luma.mcp.external"
     private static let externalMCPCredentialAccount = "default"
+    private static let externalMCPPortAccount = "port"
 
     private func loadOrMintExternalMCPToken() async throws -> String {
         if let stored = try? await llmCredentials.backing.get(
@@ -3244,6 +3250,22 @@ public final class Engine {
             token: token
         )
         return token
+    }
+
+    private func loadPreferredExternalMCPPort() async -> UInt16? {
+        guard let stored = try? await llmCredentials.backing.get(
+            service: Self.externalMCPCredentialService,
+            account: Self.externalMCPPortAccount
+        ) else { return nil }
+        return UInt16(stored)
+    }
+
+    private func savePreferredExternalMCPPort(_ port: UInt16) async {
+        try? await llmCredentials.backing.set(
+            service: Self.externalMCPCredentialService,
+            account: Self.externalMCPPortAccount,
+            token: String(port)
+        )
     }
 
     @discardableResult
