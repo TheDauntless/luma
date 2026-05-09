@@ -112,13 +112,11 @@ private func driveOpenAIStream(
     let body = buildOpenAIRequestBody(request)
     urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
-    let (bytes, response) = try await session.bytes(for: urlRequest)
-    guard let http = response as? HTTPURLResponse else {
-        throw LLMProviderError.requestFailed(status: -1, message: "Invalid response")
-    }
+    let sse = try await openServerSentEventStream(session: session, request: urlRequest)
+    let http = sse.http
     if http.statusCode != 200 {
         var errorBody = ""
-        for try await line in bytes.lines {
+        for try await line in sse.lines {
             errorBody.append(line)
             errorBody.append("\n")
             if errorBody.count > 8192 { break }
@@ -127,16 +125,16 @@ private func driveOpenAIStream(
     }
 
     var accumulator = OpenAIResponseAccumulator()
-    for try await line in bytes.lines {
+    for try await line in sse.lines {
         try Task.checkCancellation()
         if line.isEmpty || line.hasPrefix(":") { continue }
         guard line.hasPrefix("data:") else { continue }
-        let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: CharacterSet.whitespaces)
         if payload == "[DONE]" {
             break
         }
-        guard let data = payload.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let data = Data(payload.utf8)
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { continue }
         try handleOpenAIChunk(object, accumulator: &accumulator, continuation: continuation)
     }

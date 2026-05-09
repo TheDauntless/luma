@@ -84,13 +84,11 @@ public struct AnthropicProvider: LLMProvider {
         let body = try buildRequestBody(request)
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
-        let (bytes, response) = try await session.bytes(for: urlRequest)
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMProviderError.requestFailed(status: -1, message: "Invalid response")
-        }
+        let sse = try await openServerSentEventStream(session: session, request: urlRequest)
+        let http = sse.http
         if http.statusCode != 200 {
             var errorBody = ""
-            for try await line in bytes.lines {
+            for try await line in sse.lines {
                 errorBody.append(line)
                 errorBody.append("\n")
                 if errorBody.count > 8192 { break }
@@ -99,7 +97,7 @@ public struct AnthropicProvider: LLMProvider {
         }
 
         var state = SSEState()
-        for try await line in bytes.lines {
+        for try await line in sse.lines {
             try Task.checkCancellation()
             if line.isEmpty {
                 if let event = state.takeEvent() {
@@ -109,7 +107,7 @@ public struct AnthropicProvider: LLMProvider {
             }
             if line.hasPrefix(":") { continue }
             if line.hasPrefix("event:") {
-                state.eventName = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
+                state.eventName = String(line.dropFirst("event:".count)).trimmingCharacters(in: CharacterSet.whitespaces)
             } else if line.hasPrefix("data:") {
                 let payload = line.dropFirst("data:".count)
                 let trimmed = payload.first == " " ? String(payload.dropFirst()) : String(payload)
