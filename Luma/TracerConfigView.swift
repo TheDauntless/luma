@@ -435,26 +435,12 @@ struct TracerConfigView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
 
-                if selectedHookIsFunctionHook {
-                    Toggle("ITrace", isOn: bindingForSelectedHookITrace())
-                        .toggleStyle(.switch)
-                        .help("Capture instruction trace for each call up to the arming caps")
-
-                    if let arming = selectedHook?.itraceArming, let hook = selectedHook {
-                        Stepper(value: bindingForSelectedHookITraceMax(), in: 1...100) {
-                            Text("\(itraceCaptured(for: hook.id)) / \(arming.maxInvocations) calls")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        .controlSize(.small)
-
-                        Stepper(value: bindingForSelectedHookITraceBytes(), in: (256 * 1024)...(64 * 1024 * 1024), step: 256 * 1024) {
-                            Text("\(formatBytes(arming.maxBytesPerInvocation)) / call")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                        .controlSize(.small)
-                    }
+                if selectedHookIsFunctionHook, let hook = selectedHook {
+                    ITracePill(
+                        captured: itraceCaptured(for: hook.id),
+                        arming: bindingForSelectedHookITraceArming()
+                    )
+                    .id(hook.id)
                 }
             }
 
@@ -725,63 +711,19 @@ struct TracerConfigView: View {
         selectedHook?.kind == .function
     }
 
-    private func bindingForSelectedHookITrace() -> Binding<Bool> {
+    private func bindingForSelectedHookITraceArming() -> Binding<ITraceArming?> {
         Binding(
             get: {
-                guard let hook = selectedHook else { return false }
-                return config.hooks.first(where: { $0.id == hook.id })?.itraceArming != nil
+                guard let hook = selectedHook else { return nil }
+                return config.hooks.first(where: { $0.id == hook.id })?.itraceArming
             },
             set: { newValue in
                 guard let hook = selectedHook,
                     let idx = config.hooks.firstIndex(where: { $0.id == hook.id })
                 else { return }
-                config.hooks[idx].itraceArming = newValue ? ITraceArming() : nil
+                config.hooks[idx].itraceArming = newValue
             }
         )
-    }
-
-    private func bindingForSelectedHookITraceMax() -> Binding<Int> {
-        Binding(
-            get: {
-                guard let hook = selectedHook else { return ITraceArming.defaultMaxInvocations }
-                return config.hooks.first(where: { $0.id == hook.id })?.itraceArming?.maxInvocations
-                    ?? ITraceArming.defaultMaxInvocations
-            },
-            set: { newValue in
-                guard let hook = selectedHook,
-                    let idx = config.hooks.firstIndex(where: { $0.id == hook.id }),
-                    let current = config.hooks[idx].itraceArming
-                else { return }
-                config.hooks[idx].itraceArming = ITraceArming(
-                    maxInvocations: max(1, newValue),
-                    maxBytesPerInvocation: current.maxBytesPerInvocation
-                )
-            }
-        )
-    }
-
-    private func bindingForSelectedHookITraceBytes() -> Binding<Int> {
-        Binding(
-            get: {
-                guard let hook = selectedHook else { return ITraceArming.defaultMaxBytesPerInvocation }
-                return config.hooks.first(where: { $0.id == hook.id })?.itraceArming?.maxBytesPerInvocation
-                    ?? ITraceArming.defaultMaxBytesPerInvocation
-            },
-            set: { newValue in
-                guard let hook = selectedHook,
-                    let idx = config.hooks.firstIndex(where: { $0.id == hook.id }),
-                    let current = config.hooks[idx].itraceArming
-                else { return }
-                config.hooks[idx].itraceArming = ITraceArming(
-                    maxInvocations: current.maxInvocations,
-                    maxBytesPerInvocation: max(1024, newValue)
-                )
-            }
-        )
-    }
-
-    private func formatBytes(_ count: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .memory)
     }
 
     private func itraceCaptured(for hookID: UUID) -> Int {
@@ -968,6 +910,144 @@ struct TracerConfigView: View {
             throw LumaCoreError.invalidArgument("resolveTargets: '\(field)' is not a String")
         }
         return s
+    }
+}
+
+private struct ITracePill: View {
+    let captured: Int
+    @Binding var arming: ITraceArming?
+
+    @State private var isPresented = false
+    @State private var draftMaxInvocations: Int
+    @State private var draftMaxBytes: Int
+
+    init(captured: Int, arming: Binding<ITraceArming?>) {
+        self.captured = captured
+        self._arming = arming
+        let seed = arming.wrappedValue ?? ITraceArming()
+        self._draftMaxInvocations = State(initialValue: seed.maxInvocations)
+        self._draftMaxBytes = State(initialValue: seed.maxBytesPerInvocation)
+    }
+
+    var body: some View {
+        Button {
+            if let arming {
+                draftMaxInvocations = arming.maxInvocations
+                draftMaxBytes = arming.maxBytesPerInvocation
+            }
+            isPresented = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "scope").imageScale(.small)
+                Text(label).monospacedDigit()
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(fillColor, in: Capsule())
+            .foregroundStyle(strokeColor)
+            .overlay(Capsule().stroke(strokeColor.opacity(0.4), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help(arming == nil ? "Set up an instruction trace" : "Edit instruction trace caps")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            ITracePopover(
+                captured: captured,
+                isOn: arming != nil,
+                draftMaxInvocations: $draftMaxInvocations,
+                draftMaxBytes: $draftMaxBytes,
+                onEnable: enableWithDrafts,
+                onDisable: disableTrace
+            )
+        }
+    }
+
+    private var label: String {
+        guard let arming else { return "ITrace" }
+        return "ITrace \(captured) / \(arming.maxInvocations)"
+    }
+
+    private var fillColor: Color {
+        arming == nil ? Color.secondary.opacity(0.10) : Color.accentColor.opacity(0.18)
+    }
+
+    private var strokeColor: Color {
+        arming == nil ? Color.secondary : Color.accentColor
+    }
+
+    private func enableWithDrafts() {
+        arming = ITraceArming(
+            maxInvocations: draftMaxInvocations,
+            maxBytesPerInvocation: draftMaxBytes
+        )
+        isPresented = false
+    }
+
+    private func disableTrace() {
+        arming = nil
+        isPresented = false
+    }
+}
+
+private struct ITracePopover: View {
+    let captured: Int
+    let isOn: Bool
+    @Binding var draftMaxInvocations: Int
+    @Binding var draftMaxBytes: Int
+    let onEnable: () -> Void
+    let onDisable: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Instruction trace").font(.headline)
+            Text("Capture every call up to the caps below.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Stepper(value: $draftMaxInvocations, in: 1...100) {
+                    LabeledContent("Max calls") {
+                        Text("\(draftMaxInvocations)").monospacedDigit()
+                    }
+                }
+                Stepper(
+                    value: $draftMaxBytes,
+                    in: (256 * 1024)...(64 * 1024 * 1024),
+                    step: 256 * 1024
+                ) {
+                    LabeledContent("Max per call") {
+                        Text(formatBytes(draftMaxBytes)).monospacedDigit()
+                    }
+                }
+            }
+
+            if isOn {
+                Text("\(captured) of \(draftMaxInvocations) captured")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            HStack {
+                if isOn {
+                    Button(role: .destructive, action: onDisable) {
+                        Label("Disable", systemImage: "stop.circle")
+                    }
+                }
+                Spacer()
+                Button(action: onEnable) {
+                    Label(isOn ? "Save caps" : "Enable", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(width: 280)
+    }
+
+    private func formatBytes(_ count: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .memory)
     }
 }
 
