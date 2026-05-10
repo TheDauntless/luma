@@ -41,6 +41,7 @@ public enum MissionTools {
         registerAttachCustomInstrument(in: catalog, engine: engine)
         registerReadTracerHandlerTemplate(in: catalog)
         registerReadCustomInstrumentTemplate(in: catalog)
+        registerReadCustomInstrumentTypings(in: catalog, engine: engine)
         registerLookupFridaAPI(in: catalog)
         registerListPackages(in: catalog, engine: engine)
         registerInstallPackage(in: catalog, engine: engine)
@@ -1083,7 +1084,7 @@ public enum MissionTools {
     private static func registerListCustomInstruments(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "list_custom_instruments",
-            description: "List custom instrument definitions in this project (id, name, icon, feature_count). Source code is not included — fetch via read_custom_instrument.",
+            description: "List custom instrument definitions in this project (id, name, icon, feature_count, widget_count). Source code is not included — fetch via read_custom_instrument.",
             inputSchemaJSON: """
                 {"type":"object","properties":{},"additionalProperties":false}
                 """,
@@ -1098,6 +1099,7 @@ public enum MissionTools {
                     "name": def.name,
                     "icon": describeIcon(def.icon),
                     "feature_count": def.features.count,
+                    "widget_count": def.widgets.count,
                 ]
             }
             return makeResult(jsonObject: array, summary: "\(array.count) custom instrument\(array.count == 1 ? "" : "s")")
@@ -1129,9 +1131,9 @@ public enum MissionTools {
     private static func registerCreateCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "create_custom_instrument",
-            description: "Create a custom instrument definition. The definition lives in the project and can be attached to any number of sessions via attach_custom_instrument. 'source' is the full TypeScript module. Optional 'icon' is one of the catalog ids (e.g. wand-stars, bug, scope, network). Optional 'features' declares boolean toggles surfaced on config.features in the source.",
+            description: "Create a custom instrument definition. The definition lives in the project and can be attached to any number of sessions via attach_custom_instrument. 'source' is the full TypeScript module. Optional 'icon' is one of the catalog ids (e.g. wand-stars, bug, scope, network). Optional 'features' declares boolean toggles surfaced on config.features in the source. Optional 'widgets' declares live UI elements: graphs you push points to via ctx.widget(id).push({series,x,y}), or lists you maintain via upsertItem/removeItem with per-item action buttons routed back to the source's onAction handler.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"name":{"type":"string"},"icon":{"type":"string","description":"Catalog id like wand-stars, bug, scope, network — see list_custom_instrument_icons"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}}},"required":["name","source"],"additionalProperties":false}
+                {"type":"object","properties":{"name":{"type":"string"},"icon":{"type":"string","description":"Catalog id like wand-stars, bug, scope, network — see list_custom_instrument_icons"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}},"widgets":\(widgetsSchemaJSON)},"required":["name","source"],"additionalProperties":false}
                 """,
             isObserve: false,
             requiresSession: false
@@ -1146,9 +1148,11 @@ public enum MissionTools {
             }
             let icon = parseIconArg(invocation.args["icon"] as? String)
             let features = parseFeaturesArg(invocation.args["features"])
+            let widgets = parseWidgetsArg(invocation.args["widgets"])
             var def = engine.createCustomInstrument(name: name, icon: icon, source: source)
-            if !features.isEmpty {
+            if !features.isEmpty || !widgets.isEmpty {
                 def.features = features
+                def.widgets = widgets
                 await engine.updateCustomInstrument(def)
             }
             return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Created custom instrument \(def.name)")
@@ -1158,9 +1162,9 @@ public enum MissionTools {
     private static func registerUpdateCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "update_custom_instrument",
-            description: "Update a custom instrument's name, icon, source, or features. Only fields you pass change.",
+            description: "Update a custom instrument's name, icon, source, features, or widgets. Only fields you pass change. Passing 'features' or 'widgets' replaces the entire list — pass an empty array to clear.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"def_id":{"type":"string"},"name":{"type":"string"},"icon":{"type":"string"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}}},"required":["def_id"],"additionalProperties":false}
+                {"type":"object","properties":{"def_id":{"type":"string"},"name":{"type":"string"},"icon":{"type":"string"},"source":{"type":"string"},"features":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"enabled_by_default":{"type":"boolean","default":true}},"required":["id","name"],"additionalProperties":false}},"widgets":\(widgetsSchemaJSON)},"required":["def_id"],"additionalProperties":false}
                 """,
             isObserve: false,
             requiresSession: false
@@ -1184,6 +1188,9 @@ public enum MissionTools {
             }
             if invocation.args["features"] != nil {
                 def.features = parseFeaturesArg(invocation.args["features"])
+            }
+            if invocation.args["widgets"] != nil {
+                def.widgets = parseWidgetsArg(invocation.args["widgets"])
             }
             await engine.updateCustomInstrument(def)
             return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Updated custom instrument \(def.name)")
@@ -1278,6 +1285,33 @@ public enum MissionTools {
                 jsonObject: ["template": CustomInstrumentDef.exampleSource],
                 summary: "Custom instrument source template"
             )
+        }
+    }
+
+    private static func registerReadCustomInstrumentTypings(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "read_custom_instrument_typings",
+            description: "Return the TypeScript ambient declarations the editor injects when authoring this custom instrument's source: the shared CustomInstrument* surface plus the def-scoped CustomInstrumentFeatureMap and CustomInstrumentWidgetMap that narrow `config.features.<id>`, `ctx.widget(<id>)`, and the `onAction` parameter to the exact ids/series/actions you declared. Use this to write source that compiles against the same types Monaco enforces.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"def_id":{"type":"string"}},"required":["def_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine else { return errorResult("engine unavailable") }
+            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid def_id")
+            }
+            guard let def = engine.customInstruments.def(withId: defID) else {
+                return errorResult("no custom instrument with id \(defID)")
+            }
+            let scoped = CustomInstrumentTypings.defScopedDeclarations(for: def)
+            let payload: [String: Any] = [
+                "ambient": CustomInstrumentTypings.ambientDeclarations,
+                "scoped": scoped,
+            ]
+            return makeResult(jsonObject: payload, summary: "Typings for \(def.name)")
         }
     }
 
@@ -1770,6 +1804,47 @@ public enum MissionTools {
         }
     }
 
+    private static let widgetsSchemaJSON: String = """
+        {"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string","enum":["graph","list"]},"persistence":{"type":"string","enum":["none","session"],"default":"none","description":"'none' = data lives in memory, lost on detach. 'session' = data survives reattach and app restart, replayed to create() via the `restored` argument."},"series":{"type":"array","description":"For kind=graph: line series the agent will push points to.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}},"actions":{"type":"array","description":"For kind=list: per-item action buttons; clicks invoke onAction with {widget,action,item}.","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":false}}},"required":["id","name","kind"],"additionalProperties":false}}
+        """
+
+    private static func parseWidgetsArg(_ raw: Any?) -> [InstrumentWidget] {
+        guard let arr = raw as? [[String: Any]] else { return [] }
+        return arr.compactMap { obj in
+            guard let id = obj["id"] as? String,
+                let name = obj["name"] as? String,
+                let kindStr = obj["kind"] as? String
+            else { return nil }
+            let persistence = (obj["persistence"] as? String).flatMap(InstrumentWidget.Persistence.init(rawValue:)) ?? .none
+            switch kindStr {
+            case "graph":
+                return InstrumentWidget(id: id, name: name, kind: .graph(parseGraphConfigArg(obj["series"])), persistence: persistence)
+            case "list":
+                return InstrumentWidget(id: id, name: name, kind: .list(parseListConfigArg(obj["actions"])), persistence: persistence)
+            default:
+                return nil
+            }
+        }
+    }
+
+    private static func parseGraphConfigArg(_ raw: Any?) -> InstrumentWidget.GraphConfig {
+        let entries = (raw as? [[String: Any]]) ?? []
+        let series = entries.compactMap { obj -> InstrumentWidget.Series? in
+            guard let sid = obj["id"] as? String, let sname = obj["name"] as? String else { return nil }
+            return InstrumentWidget.Series(id: sid, name: sname)
+        }
+        return InstrumentWidget.GraphConfig(series: series)
+    }
+
+    private static func parseListConfigArg(_ raw: Any?) -> InstrumentWidget.ListConfig {
+        let entries = (raw as? [[String: Any]]) ?? []
+        let actions = entries.compactMap { obj -> InstrumentWidget.Action? in
+            guard let aid = obj["id"] as? String, let aname = obj["name"] as? String else { return nil }
+            return InstrumentWidget.Action(id: aid, name: aname)
+        }
+        return InstrumentWidget.ListConfig(actions: actions)
+    }
+
     private static func customInstrumentJSON(def: CustomInstrumentDef) -> [String: Any] {
         let features: [[String: Any]] = def.features.map { feature in
             [
@@ -1778,13 +1853,32 @@ public enum MissionTools {
                 "enabled_by_default": feature.enabledByDefault,
             ]
         }
+        let widgets: [[String: Any]] = def.widgets.map(customInstrumentWidgetJSON)
         return [
             "id": def.id.uuidString,
             "name": def.name,
             "icon": describeIcon(def.icon),
             "source": def.source,
             "features": features,
+            "widgets": widgets,
         ]
+    }
+
+    private static func customInstrumentWidgetJSON(_ widget: InstrumentWidget) -> [String: Any] {
+        var obj: [String: Any] = [
+            "id": widget.id,
+            "name": widget.name,
+            "persistence": widget.persistence.rawValue,
+        ]
+        switch widget.kind {
+        case .graph(let cfg):
+            obj["kind"] = "graph"
+            obj["series"] = cfg.series.map { ["id": $0.id, "name": $0.name] }
+        case .list(let cfg):
+            obj["kind"] = "list"
+            obj["actions"] = cfg.actions.map { ["id": $0.id, "name": $0.name] }
+        }
+        return obj
     }
 
     // MARK: - record_finding (observe — auto-runs, validates evidence)
