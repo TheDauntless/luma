@@ -22,6 +22,13 @@ public extension Icon {
     }
 }
 
+public extension ProcessSession {
+    mutating func adoptIcon(from process: ProcessDetails) {
+        guard iconPNGData == nil, let icon = process.icons.last else { return }
+        iconPNGData = icon.pngData
+    }
+}
+
 #if canImport(CoreGraphics)
 private func encodeCGImageAsPNG(_ image: CGImage) -> Data? {
     let buffer = NSMutableData()

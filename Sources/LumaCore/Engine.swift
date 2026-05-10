@@ -1249,9 +1249,7 @@ public final class Engine {
         s.detachReason = .applicationRequested
         s.lastError = nil
         s.phase = .attaching
-        if s.iconPNGData == nil, let icon = process.icons.last {
-            s.iconPNGData = icon.pngData
-        }
+        s.adoptIcon(from: process)
         saveSession(s)
 
         do {

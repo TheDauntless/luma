@@ -265,11 +265,7 @@ struct MainWindowView: View {
             sessionRecord.processName = proc.name
             sessionRecord.lastKnownPID = proc.pid
 
-            if sessionRecord.iconPNGData == nil,
-                let icon = proc.icons.last
-            {
-                sessionRecord.iconPNGData = icon.pngData
-            }
+            sessionRecord.adoptIcon(from: proc)
 
             try? workspace.store.save(sessionRecord)
             workspace.selectedSidebarItem = .session(sessionRecord.id)

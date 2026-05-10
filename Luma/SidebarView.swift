@@ -390,22 +390,12 @@ private struct SidebarSessionHeaderRow: View {
     private var iconView: some View {
         if let host = session.host, host.id != workspace.engine.collaboration.localUser?.id {
             hostAvatarView(host: host)
-        } else if let node, let lastIcon = node.processIcons.last {
-            lastIcon.swiftUIImage
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .cornerRadius(4)
         } else if let data = session.iconPNGData {
             Icon.png(data: Array(data)).swiftUIImage
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
                 .cornerRadius(4)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.accentColor.opacity(0.6), lineWidth: 1)
-                )
         } else {
             IconPlaceholderView(
                 seed: placeholderSeed,

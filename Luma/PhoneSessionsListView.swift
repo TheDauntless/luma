@@ -281,9 +281,7 @@ struct PhoneSessionsListView: View {
             record.deviceName = device.name
             record.processName = proc.name
             record.lastKnownPID = proc.pid
-            if record.iconPNGData == nil, let icon = proc.icons.last {
-                record.iconPNGData = icon.pngData
-            }
+            record.adoptIcon(from: proc)
             try? workspace.store.save(record)
             _ = try? await workspace.engine.attach(device: device, process: proc, session: record)
 
@@ -362,13 +360,7 @@ struct PhoneSessionRow: View {
 
     @ViewBuilder
     private var icon: some View {
-        if let node, let lastIcon = node.processIcons.last {
-            lastIcon.swiftUIImage
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .cornerRadius(6)
-        } else if let data = session.iconPNGData {
+        if let data = session.iconPNGData {
             Icon.png(data: Array(data)).swiftUIImage
                 .resizable()
                 .interpolation(.high)
