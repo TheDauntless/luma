@@ -2222,6 +2222,7 @@ public final class Engine {
         sessionID: UUID,
         address: UInt64,
         kind: TracerHookKind,
+        code: String? = nil,
         preferredAnchor: AddressAnchor? = nil
     ) async -> (instrumentID: UUID, hookID: UUID)? {
         guard (try? store.fetchSession(id: sessionID)) != nil else { return nil }
@@ -2236,14 +2237,14 @@ public final class Engine {
         }
 
         let displayName = anchor.displayString
-        let stub = defaultTracerCode(kind: kind, anchor: anchor, displayName: displayName)
+        let hookCode = code ?? defaultTracerCode(kind: kind, anchor: anchor, displayName: displayName)
         let newHook = TracerConfig.Hook(
             id: UUID(),
             displayName: displayName,
             addressAnchor: anchor,
             kind: kind,
             isEnabled: true,
-            code: stub
+            code: hookCode
         )
 
         if let existing = tracerInstance(forSessionID: sessionID) {
@@ -2428,6 +2429,43 @@ public final class Engine {
     private func tracerInstance(forSessionID sessionID: UUID) -> InstrumentInstance? {
         let instruments = (try? store.fetchInstruments(sessionID: sessionID)) ?? []
         return instruments.first(where: { $0.kind == .tracer })
+    }
+
+    public func tracerHooks(forSessionID sessionID: UUID) -> [TracerConfig.Hook]? {
+        guard let instance = tracerInstance(forSessionID: sessionID),
+            let config = try? TracerConfig.decode(from: instance.configJSON)
+        else { return nil }
+        return config.hooks
+    }
+
+    public func tracerHook(sessionID: UUID, hookID: UUID) -> TracerConfig.Hook? {
+        tracerHooks(forSessionID: sessionID)?.first(where: { $0.id == hookID })
+    }
+
+    @discardableResult
+    public func updateTracerHook(
+        sessionID: UUID,
+        hookID: UUID,
+        _ mutate: (inout TracerConfig.Hook) -> Void
+    ) async -> TracerConfig.Hook? {
+        guard let instance = tracerInstance(forSessionID: sessionID) else { return nil }
+        var config = (try? TracerConfig.decode(from: instance.configJSON)) ?? TracerConfig()
+        guard let idx = config.hooks.firstIndex(where: { $0.id == hookID }) else { return nil }
+        mutate(&config.hooks[idx])
+        let updated = config.hooks[idx]
+        await applyInstrumentConfig(instance, configJSON: config.encode())
+        return updated
+    }
+
+    @discardableResult
+    public func removeTracerHook(sessionID: UUID, hookID: UUID) async -> Bool {
+        guard let instance = tracerInstance(forSessionID: sessionID) else { return false }
+        var config = (try? TracerConfig.decode(from: instance.configJSON)) ?? TracerConfig()
+        let originalCount = config.hooks.count
+        config.hooks.removeAll(where: { $0.id == hookID })
+        guard config.hooks.count != originalCount else { return false }
+        await applyInstrumentConfig(instance, configJSON: config.encode())
+        return true
     }
 
     // MARK: - Tracer Compilation

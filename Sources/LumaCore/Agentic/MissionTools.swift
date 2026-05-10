@@ -21,8 +21,12 @@ public enum MissionTools {
         registerExplainFunction(in: catalog, engine: engine)
         registerReadMemory(in: catalog, engine: engine)
         registerRecordFinding(in: catalog, engine: engine)
-        registerInstallTracerHook(in: catalog, engine: engine)
         registerEvalREPL(in: catalog, engine: engine)
+        registerInstallTracerHook(in: catalog, engine: engine)
+        registerListTracerHooks(in: catalog, engine: engine)
+        registerReadTracerHook(in: catalog, engine: engine)
+        registerUpdateTracerHook(in: catalog, engine: engine)
+        registerRemoveTracerHook(in: catalog, engine: engine)
         registerPinAsInsight(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
     }
@@ -552,65 +556,6 @@ public enum MissionTools {
         }
     }
 
-    // MARK: - install_tracer_hook (act)
-
-    private static func registerInstallTracerHook(in catalog: ToolCatalog, engine: Engine) {
-        let spec = ActionSpec(
-            name: "install_tracer_hook",
-            description: "Install a tracer hook. The 'target' is either a hex address or a symbol query — if a symbol query, it's resolved against exports first. The hook is installed disabled by default; set 'enable' true to enable immediately.",
-            inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"target":{"type":"string","description":"Hex address (0x...) or symbol query"},"kind":{"type":"string","enum":["function","instruction"],"default":"function"},"enable":{"type":"boolean","default":false}},"required":["session_id","target"],"additionalProperties":false}
-                """,
-            isObserve: false,
-            requiresSession: true
-        )
-        catalog.register(spec: spec) { [weak engine] invocation in
-            guard let engine, let sessionID = parseSessionID(invocation.args) else {
-                return errorResult("missing or invalid session_id")
-            }
-            guard let target = invocation.args["target"] as? String, !target.isEmpty else {
-                return errorResult("missing target")
-            }
-            let kindString = (invocation.args["kind"] as? String) ?? "function"
-            let kind: TracerHookKind = kindString == "instruction" ? .instruction : .function
-
-            let address: UInt64
-            if let parsed = parseHexAddress(target) {
-                address = parsed
-            } else {
-                guard let node = engine.node(forSessionID: sessionID) else {
-                    return errorResult("no attached session for id \(sessionID)")
-                }
-                do {
-                    let resolved = try await node.resolveTargets(scope: "exports", query: target)
-                    guard let first = resolved.first,
-                        let addrStr = first["address"] as? String,
-                        let parsed = parseHexAddress(addrStr)
-                    else {
-                        return errorResult("could not resolve target '\(target)'")
-                    }
-                    address = parsed
-                } catch {
-                    return errorResult("resolve failed: \(error.localizedDescription)")
-                }
-            }
-
-            guard let result = await engine.addTracerHook(sessionID: sessionID, address: address, kind: kind) else {
-                return errorResult("failed to install hook at \(String(format: "0x%llx", address))")
-            }
-            let payload: [String: Any] = [
-                "instrument_id": result.instrumentID.uuidString,
-                "hook_id": result.hookID.uuidString,
-                "address": String(format: "0x%llx", address),
-                "target": target,
-            ]
-            return makeResult(
-                jsonObject: payload,
-                summary: "Installed tracer hook at \(String(format: "0x%llx", address)) (\(target))"
-            )
-        }
-    }
-
     // MARK: - eval_repl (act)
 
     private static func registerEvalREPL(in catalog: ToolCatalog, engine: Engine) {
@@ -643,6 +588,199 @@ public enum MissionTools {
                 jsonObject: payload,
                 summary: "Submitted REPL evaluation (cell \(cellID.uuidString.prefix(8)))"
             )
+        }
+    }
+
+    // MARK: - install_tracer_hook (act)
+
+    private static func registerInstallTracerHook(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "install_tracer_hook",
+            description: "Install a tracer hook. The 'target' is either a hex address or a symbol query — if a symbol query, it's resolved against exports first. Pass 'code' to start with custom JS in one shot; omit to install the default stub. The hook is enabled on install. If a hook already exists at the same anchor, the existing hook is returned unchanged — use update_tracer_hook to modify it.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"target":{"type":"string","description":"Hex address (0x...) or symbol query"},"kind":{"type":"string","enum":["function","instruction"],"default":"function"},"code":{"type":"string","description":"Custom JS handler. Omit to use the default stub for this hook kind."}},"required":["session_id","target"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let target = invocation.args["target"] as? String, !target.isEmpty else {
+                return errorResult("missing target")
+            }
+            let kindString = (invocation.args["kind"] as? String) ?? "function"
+            let kind: TracerHookKind = kindString == "instruction" ? .instruction : .function
+            let code = (invocation.args["code"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+
+            let address: UInt64
+            if let parsed = parseHexAddress(target) {
+                address = parsed
+            } else {
+                guard let node = engine.node(forSessionID: sessionID) else {
+                    return errorResult("no attached session for id \(sessionID)")
+                }
+                do {
+                    let resolved = try await node.resolveTargets(scope: "exports", query: target)
+                    guard let first = resolved.first,
+                        let addrStr = first["address"] as? String,
+                        let parsed = parseHexAddress(addrStr)
+                    else {
+                        return errorResult("could not resolve target '\(target)'")
+                    }
+                    address = parsed
+                } catch {
+                    return errorResult("resolve failed: \(error.localizedDescription)")
+                }
+            }
+
+            guard let result = await engine.addTracerHook(sessionID: sessionID, address: address, kind: kind, code: code) else {
+                return errorResult("failed to install hook at \(String(format: "0x%llx", address))")
+            }
+            let payload: [String: Any] = [
+                "instrument_id": result.instrumentID.uuidString,
+                "hook_id": result.hookID.uuidString,
+                "address": String(format: "0x%llx", address),
+                "target": target,
+            ]
+            return makeResult(
+                jsonObject: payload,
+                summary: "Installed tracer hook at \(String(format: "0x%llx", address)) (\(target))"
+            )
+        }
+    }
+
+    private static func registerListTracerHooks(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_tracer_hooks",
+            description: "List tracer hooks installed on the session. Returns metadata only (id, target, kind, enabled, itrace, pinned). Fetch the JS body via read_tracer_hook when you need it.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let hooks = engine.tracerHooks(forSessionID: sessionID) else {
+                return makeResult(jsonObject: [], summary: "No tracer instrument on this session")
+            }
+            let array: [[String: Any]] = hooks.map { hook in
+                [
+                    "hook_id": hook.id.uuidString,
+                    "display_name": hook.displayName,
+                    "kind": hook.kind.rawValue,
+                    "is_enabled": hook.isEnabled,
+                    "is_pinned": hook.isPinned,
+                    "itrace_enabled": hook.itraceEnabled,
+                ]
+            }
+            return makeResult(jsonObject: array, summary: "\(hooks.count) tracer hook\(hooks.count == 1 ? "" : "s")")
+        }
+    }
+
+    private static func registerReadTracerHook(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "read_tracer_hook",
+            description: "Read a tracer hook's full body, including its JS handler code. Use this only when you intend to read or edit the code; list_tracer_hooks is cheaper for surveying hooks.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"}},"required":["session_id","hook_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let hookID = (invocation.args["hook_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid hook_id")
+            }
+            guard let hook = engine.tracerHook(sessionID: sessionID, hookID: hookID) else {
+                return errorResult("no tracer hook with id \(hookID)")
+            }
+            let payload: [String: Any] = [
+                "hook_id": hook.id.uuidString,
+                "display_name": hook.displayName,
+                "kind": hook.kind.rawValue,
+                "is_enabled": hook.isEnabled,
+                "is_pinned": hook.isPinned,
+                "itrace_enabled": hook.itraceEnabled,
+                "code": hook.code,
+            ]
+            return makeResult(jsonObject: payload, summary: "Hook \(hook.displayName)")
+        }
+    }
+
+    private static func registerUpdateTracerHook(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "update_tracer_hook",
+            description: "Update one or more fields of a tracer hook. Only fields you pass are changed. Pass 'code' to swap the JS handler.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"},"code":{"type":"string"},"display_name":{"type":"string"},"is_enabled":{"type":"boolean"},"is_pinned":{"type":"boolean"},"itrace_enabled":{"type":"boolean"}},"required":["session_id","hook_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let hookID = (invocation.args["hook_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid hook_id")
+            }
+            let code = invocation.args["code"] as? String
+            let displayName = invocation.args["display_name"] as? String
+            let isEnabled = invocation.args["is_enabled"] as? Bool
+            let isPinned = invocation.args["is_pinned"] as? Bool
+            let itraceEnabled = invocation.args["itrace_enabled"] as? Bool
+
+            guard let updated = await engine.updateTracerHook(sessionID: sessionID, hookID: hookID, { hook in
+                if let code { hook.code = code }
+                if let displayName { hook.displayName = displayName }
+                if let isEnabled { hook.isEnabled = isEnabled }
+                if let isPinned { hook.isPinned = isPinned }
+                if let itraceEnabled { hook.itraceEnabled = itraceEnabled }
+            }) else {
+                return errorResult("no tracer hook with id \(hookID)")
+            }
+            let payload: [String: Any] = [
+                "hook_id": updated.id.uuidString,
+                "display_name": updated.displayName,
+                "is_enabled": updated.isEnabled,
+                "is_pinned": updated.isPinned,
+                "itrace_enabled": updated.itraceEnabled,
+            ]
+            return makeResult(jsonObject: payload, summary: "Updated hook \(updated.displayName)")
+        }
+    }
+
+    private static func registerRemoveTracerHook(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "remove_tracer_hook",
+            description: "Remove a tracer hook from the session.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"}},"required":["session_id","hook_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let hookID = (invocation.args["hook_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid hook_id")
+            }
+            let removed = await engine.removeTracerHook(sessionID: sessionID, hookID: hookID)
+            guard removed else {
+                return errorResult("no tracer hook with id \(hookID)")
+            }
+            let payload: [String: Any] = ["hook_id": hookID.uuidString, "removed": true]
+            return makeResult(jsonObject: payload, summary: "Removed hook \(hookID)")
         }
     }
 
