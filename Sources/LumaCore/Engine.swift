@@ -2401,6 +2401,17 @@ public final class Engine {
         try? await node.stopTraceOnAgent(traceID: traceID)
     }
 
+    public func decodeTrace(traceID: UUID, sessionID: UUID) async -> DecodedITrace? {
+        let sessionTraces = tracesBySession[sessionID] ?? []
+        guard let trace = sessionTraces.first(where: { $0.id == traceID }) else { return nil }
+        do {
+            let data = try await loadTraceData(traceID: traceID, sessionID: sessionID, expectedSize: trace.dataSize)
+            return try ITraceDecoder.decode(traceData: data, metadataJSON: trace.metadataJSON)
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Address Annotations
 
     public func rebuildAddressAnnotations(sessionID: UUID) {

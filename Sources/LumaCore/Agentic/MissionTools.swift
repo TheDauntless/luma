@@ -39,6 +39,13 @@ public enum MissionTools {
         registerListPackages(in: catalog, engine: engine)
         registerInstallPackage(in: catalog, engine: engine)
         registerRemovePackage(in: catalog, engine: engine)
+        registerStartThreadTrace(in: catalog, engine: engine)
+        registerStopTrace(in: catalog, engine: engine)
+        registerListTraces(in: catalog, engine: engine)
+        registerSummarizeTrace(in: catalog, engine: engine)
+        registerListTraceFunctionCalls(in: catalog, engine: engine)
+        registerReadTraceFunctionCall(in: catalog, engine: engine)
+        registerReadTraceRegisterState(in: catalog, engine: engine)
         registerPinAsInsight(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
     }
@@ -1210,6 +1217,289 @@ public enum MissionTools {
                 return errorResult("remove failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private static func registerStartThreadTrace(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "start_thread_trace",
+            description: "Start an instruction trace for a specific thread. Returns trace_id; pair with stop_trace once you've triggered the behavior you want to observe. Trace data is bounded by the agent's ring buffer, but the longer it runs the more is captured — keep it short.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"thread_id":{"type":"integer","minimum":0},"thread_name":{"type":"string"}},"required":["session_id","thread_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let threadIDRaw = invocation.args["thread_id"] as? Int, threadIDRaw >= 0 else {
+                return errorResult("missing or invalid thread_id")
+            }
+            let threadName = invocation.args["thread_name"] as? String
+            guard let trace = await engine.startThreadTrace(sessionID: sessionID, threadID: UInt(threadIDRaw), threadName: threadName) else {
+                return errorResult("failed to start thread trace")
+            }
+            return makeResult(jsonObject: traceListEntry(trace), summary: "Started \(trace.displayName)")
+        }
+    }
+
+    private static func registerStopTrace(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "stop_trace",
+            description: "Stop a running instruction trace. After this returns, summarize_trace and the read_* tools have a stable picture.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"trace_id":{"type":"string"}},"required":["session_id","trace_id"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let traceID = (invocation.args["trace_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid trace_id")
+            }
+            await engine.stopThreadTrace(traceID: traceID, sessionID: sessionID)
+            return makeResult(jsonObject: ["trace_id": traceID.uuidString, "stopped": true], summary: "Stopped trace \(traceID)")
+        }
+    }
+
+    private static func registerListTraces(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_traces",
+            description: "List instruction traces saved on this session — id, origin (functionCall hookID/callIndex or thread tid), display name, status, byte size. Use summarize_trace before reading raw entries.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            let traces = engine.tracesBySession[sessionID] ?? []
+            let array = traces.map(traceListEntry)
+            return makeResult(jsonObject: array, summary: "\(traces.count) trace\(traces.count == 1 ? "" : "s")")
+        }
+    }
+
+    private static func registerSummarizeTrace(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "summarize_trace",
+            description: "Summarize a trace: total entries, function-call count, top-N functions by entry count. Cheap; doesn't return raw entries.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"trace_id":{"type":"string"},"top_n":{"type":"integer","minimum":1,"maximum":50,"default":10}},"required":["session_id","trace_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let traceID = (invocation.args["trace_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid trace_id")
+            }
+            guard let decoded = await engine.decodeTrace(traceID: traceID, sessionID: sessionID) else {
+                return errorResult("could not decode trace \(traceID)")
+            }
+            let topN = (invocation.args["top_n"] as? Int) ?? 10
+            let topCalls = decoded.functionCalls
+                .sorted { $0.entryCount > $1.entryCount }
+                .prefix(topN)
+                .map { call -> [String: Any] in
+                    [
+                        "function_name": call.functionName,
+                        "entry_count": call.entryCount,
+                        "start_index": call.startIndex,
+                        "end_index": call.endIndex,
+                    ]
+                }
+            let firstAddr = decoded.entries.first.map { String(format: "0x%llx", $0.blockAddress) }
+            let lastAddr = decoded.entries.last.map { String(format: "0x%llx", $0.blockAddress) }
+            var payload: [String: Any] = [
+                "trace_id": traceID.uuidString,
+                "entry_count": decoded.entries.count,
+                "function_call_count": decoded.functionCalls.count,
+                "register_count": decoded.registerNames.count,
+                "top_function_calls": topCalls,
+            ]
+            if let firstAddr { payload["first_block_address"] = firstAddr }
+            if let lastAddr { payload["last_block_address"] = lastAddr }
+            return makeResult(jsonObject: payload, summary: "\(decoded.entries.count) entries, \(decoded.functionCalls.count) function calls")
+        }
+    }
+
+    private static func registerListTraceFunctionCalls(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "list_trace_function_calls",
+            description: "Paginate through function calls observed in a trace. Returns name, entry range, and entry count — no addresses or register state.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"trace_id":{"type":"string"},"offset":{"type":"integer","minimum":0,"default":0},"limit":{"type":"integer","minimum":1,"maximum":200,"default":50}},"required":["session_id","trace_id"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let traceID = (invocation.args["trace_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid trace_id")
+            }
+            guard let decoded = await engine.decodeTrace(traceID: traceID, sessionID: sessionID) else {
+                return errorResult("could not decode trace \(traceID)")
+            }
+            let offset = (invocation.args["offset"] as? Int) ?? 0
+            let limit = (invocation.args["limit"] as? Int) ?? 50
+            let calls = decoded.functionCalls
+            let slice = calls.dropFirst(offset).prefix(limit)
+            let array = slice.enumerated().map { idx, call -> [String: Any] in
+                [
+                    "index": offset + idx,
+                    "function_name": call.functionName,
+                    "start_index": call.startIndex,
+                    "end_index": call.endIndex,
+                    "entry_count": call.entryCount,
+                ]
+            }
+            let payload: [String: Any] = [
+                "trace_id": traceID.uuidString,
+                "total": calls.count,
+                "offset": offset,
+                "function_calls": array,
+            ]
+            return makeResult(jsonObject: payload, summary: "\(slice.count) of \(calls.count) function calls")
+        }
+    }
+
+    private static func registerReadTraceFunctionCall(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "read_trace_function_call",
+            description: "Read the basic blocks executed within one function call (resolved by index from list_trace_function_calls). Returns each block's address and size, capped to max_blocks. Pair with the disassemble tool for instruction text.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"trace_id":{"type":"string"},"call_index":{"type":"integer","minimum":0},"max_blocks":{"type":"integer","minimum":1,"maximum":1000,"default":200}},"required":["session_id","trace_id","call_index"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let traceID = (invocation.args["trace_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid trace_id")
+            }
+            guard let callIndex = invocation.args["call_index"] as? Int, callIndex >= 0 else {
+                return errorResult("missing or invalid call_index")
+            }
+            guard let decoded = await engine.decodeTrace(traceID: traceID, sessionID: sessionID) else {
+                return errorResult("could not decode trace \(traceID)")
+            }
+            guard callIndex < decoded.functionCalls.count else {
+                return errorResult("call_index \(callIndex) out of range (\(decoded.functionCalls.count) calls)")
+            }
+            let call = decoded.functionCalls[callIndex]
+            let maxBlocks = (invocation.args["max_blocks"] as? Int) ?? 200
+            let cappedEnd = min(call.endIndex, call.startIndex + maxBlocks)
+            let blocks = decoded.entries[call.startIndex..<cappedEnd].enumerated().map { offset, entry -> [String: Any] in
+                [
+                    "entry_index": call.startIndex + offset,
+                    "address": String(format: "0x%llx", entry.blockAddress),
+                    "size": entry.blockSize,
+                    "name": entry.blockName,
+                ]
+            }
+            let payload: [String: Any] = [
+                "trace_id": traceID.uuidString,
+                "call_index": callIndex,
+                "function_name": call.functionName,
+                "start_index": call.startIndex,
+                "end_index": call.endIndex,
+                "returned": blocks.count,
+                "truncated": blocks.count < call.entryCount,
+                "blocks": blocks,
+            ]
+            return makeResult(jsonObject: payload, summary: "\(blocks.count) of \(call.entryCount) blocks for \(call.shortName)")
+        }
+    }
+
+    private static func registerReadTraceRegisterState(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "read_trace_register_state",
+            description: "Return the register state at a specific entry in a trace. Useful for spotting argument or return values around a particular block. Pass the entry_index you got from read_trace_function_call.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"trace_id":{"type":"string"},"entry_index":{"type":"integer","minimum":0}},"required":["session_id","trace_id","entry_index"],"additionalProperties":false}
+                """,
+            isObserve: true,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id")
+            }
+            guard let traceID = (invocation.args["trace_id"] as? String).flatMap(UUID.init(uuidString:)) else {
+                return errorResult("missing or invalid trace_id")
+            }
+            guard let entryIndex = invocation.args["entry_index"] as? Int, entryIndex >= 0 else {
+                return errorResult("missing or invalid entry_index")
+            }
+            guard let decoded = await engine.decodeTrace(traceID: traceID, sessionID: sessionID) else {
+                return errorResult("could not decode trace \(traceID)")
+            }
+            guard entryIndex < decoded.registerStates.count else {
+                return errorResult("entry_index \(entryIndex) out of range (\(decoded.registerStates.count) entries)")
+            }
+            let state = decoded.registerStates[entryIndex]
+            var values: [String: String] = [:]
+            for (idx, value) in state.values {
+                guard idx < decoded.registerNames.count else { continue }
+                values[decoded.registerNames[idx]] = String(format: "0x%llx", value)
+            }
+            let changed = state.changed.compactMap { idx -> String? in
+                guard idx < decoded.registerNames.count else { return nil }
+                return decoded.registerNames[idx]
+            }
+            let payload: [String: Any] = [
+                "trace_id": traceID.uuidString,
+                "entry_index": entryIndex,
+                "registers": values,
+                "changed": changed,
+            ]
+            return makeResult(jsonObject: payload, summary: "Register state at entry \(entryIndex)")
+        }
+    }
+
+    private static func traceListEntry(_ trace: ITrace) -> [String: Any] {
+        var entry: [String: Any] = [
+            "trace_id": trace.id.uuidString,
+            "display_name": trace.displayName,
+            "status": trace.isRunning ? "running" : "stopped",
+            "data_size": trace.dataSize,
+            "started_at": ISO8601DateFormatter().string(from: trace.startedAt),
+        ]
+        if let stoppedAt = trace.stoppedAt {
+            entry["stopped_at"] = ISO8601DateFormatter().string(from: stoppedAt)
+        }
+        switch trace.origin {
+        case .functionCall(let hookID, let callIndex):
+            entry["origin"] = [
+                "kind": "function_call",
+                "hook_id": hookID.uuidString,
+                "call_index": callIndex,
+            ]
+        case .thread(let tid, let name):
+            var origin: [String: Any] = [
+                "kind": "thread",
+                "thread_id": tid,
+            ]
+            if let name { origin["thread_name"] = name }
+            entry["origin"] = origin
+        }
+        return entry
     }
 
     private static func describeIcon(_ icon: InstrumentIcon) -> String {
