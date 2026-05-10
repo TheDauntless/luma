@@ -248,7 +248,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         //
         // The example below assumes:
         //   - one feature `logStack` (Boolean)
-        //   - one graph widget `opens` with series `count` and
+        //   - one graph widget `opens` with series `length` and
         //     Persistence = Session (required for `restored.opens`
         //     to type-check)
         //   - one list widget `paths` with action `bookmark`
@@ -269,7 +269,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
                         onEnter(args) {
                             const path = args[0].readUtf8String()!;
                             ctx.emit({ syscall: "open", path });
-                            ctx.widget("opens").push({ series: "count", x: Date.now(), y: ++count });
+                            ctx.widget("opens").push({ series: "length", x: ++count, y: path.length });
                             ctx.widget("paths").upsertItem({ id: path, title: path });
                             if (current.features.logStack) {
                                 ctx.emit({ stack: this.context.sp.readByteArray(64) });
