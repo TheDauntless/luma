@@ -340,7 +340,9 @@ private struct SidebarSessionHeaderRow: View {
 
     @ViewBuilder
     private var armingMenuButton: some View {
-        if isArmed {
+        if case .attach = session.kind {
+            EmptyView()
+        } else if isArmed {
             Button {
                 disarm()
             } label: {
