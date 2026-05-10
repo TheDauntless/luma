@@ -287,16 +287,12 @@ private struct FeatureRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                if isBooleanSchema {
-                    Image(systemName: "chevron.right").opacity(0)
-                } else {
-                    Button {
-                        expandedID = isExpanded ? nil : feature.id
-                    } label: {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    }
-                    .buttonStyle(.borderless)
+                Button {
+                    expandedID = isExpanded ? nil : feature.id
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 }
+                .buttonStyle(.borderless)
                 Text(feature.id).font(.system(.caption, design: .monospaced))
                 Text("—").foregroundStyle(.secondary)
                 Text(feature.name)
@@ -309,13 +305,15 @@ private struct FeatureRow: View {
                 }
                 .buttonStyle(.borderless)
             }
-            if isExpanded && !isBooleanSchema {
+            if isExpanded {
                 VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Optional (user can disable)", isOn: $feature.optional)
-                        .platformCheckboxToggleStyle()
-                    if feature.optional {
-                        Toggle("Enabled by default", isOn: $feature.enabledByDefault)
+                    if !isBooleanSchema {
+                        Toggle("Optional (user can disable)", isOn: $feature.optional)
                             .platformCheckboxToggleStyle()
+                        if feature.optional {
+                            Toggle("Enabled by default", isOn: $feature.enabledByDefault)
+                                .platformCheckboxToggleStyle()
+                        }
                     }
                     CustomInstrumentSchemaEditor(schema: $feature.schema)
                 }
@@ -327,11 +325,10 @@ private struct FeatureRow: View {
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.08)))
         .onChange(of: feature.schema) { _, newSchema in
-            if case .boolean = newSchema {
-                if feature.optional { feature.optional = false }
-            } else {
-                expandedID = feature.id
+            if case .boolean = newSchema, feature.optional {
+                feature.optional = false
             }
+            expandedID = feature.id
         }
     }
 }

@@ -244,22 +244,17 @@ final class CustomInstrumentFeaturesDialog {
         card.append(child: column)
 
         let booleanFeature = isBoolean(feature.schema)
-        let isExpanded = !booleanFeature && expandedFeatureID == feature.id
+        let isExpanded = expandedFeatureID == feature.id
         let featureID = feature.id
 
         let chevronButton = Button()
         chevronButton.add(cssClass: "flat")
         chevronButton.set(iconName: isExpanded ? "pan-down-symbolic" : "pan-end-symbolic")
-        if booleanFeature {
-            chevronButton.opacity = 0
-            chevronButton.sensitive = false
-        } else {
-            chevronButton.onClicked { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    let newID: String? = (self.expandedFeatureID == featureID) ? nil : featureID
-                    self.applyExpansion(to: newID)
-                }
+        chevronButton.onClicked { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let newID: String? = (self.expandedFeatureID == featureID) ? nil : featureID
+                self.applyExpansion(to: newID)
             }
         }
 
@@ -283,11 +278,10 @@ final class CustomInstrumentFeaturesDialog {
             guard let self, index < self.draftFeatures.count else { return }
             let newSchema = kind.defaultSchema()
             self.draftFeatures[index].schema = newSchema
-            let nowBoolean = self.isBoolean(newSchema)
-            if nowBoolean, self.draftFeatures[index].optional {
+            if self.isBoolean(newSchema), self.draftFeatures[index].optional {
                 self.draftFeatures[index].optional = false
             }
-            self.expandedFeatureID = nowBoolean ? nil : self.draftFeatures[index].id
+            self.expandedFeatureID = self.draftFeatures[index].id
             self.rebuildList()
         }
         header.append(child: kindDropdown)
@@ -316,6 +310,7 @@ final class CustomInstrumentFeaturesDialog {
         let optionalLabel = Label(str: "Optional (user can disable)")
         optionalLabel.halign = .start
         optionalRow.append(child: optionalLabel)
+        optionalRow.visible = !booleanFeature
 
         let enabledRow = Box(orientation: .horizontal, spacing: 8)
         let enabledToggle = Switch()
@@ -325,7 +320,7 @@ final class CustomInstrumentFeaturesDialog {
         let enabledLabel = Label(str: "Enabled by default")
         enabledLabel.halign = .start
         enabledRow.append(child: enabledLabel)
-        enabledRow.visible = feature.optional
+        enabledRow.visible = !booleanFeature && feature.optional
 
         let editor = CustomInstrumentSchemaEditor(schema: feature.schema) { [weak self] updated in
             MainActor.assumeIsolated {
@@ -356,9 +351,7 @@ final class CustomInstrumentFeaturesDialog {
         body.append(child: editor.widget)
         column.append(child: body)
 
-        if !booleanFeature {
-            featureBodies[featureID] = (body, chevronButton)
-        }
+        featureBodies[featureID] = (body, chevronButton)
 
         return card
     }

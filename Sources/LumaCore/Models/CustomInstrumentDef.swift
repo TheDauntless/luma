@@ -22,7 +22,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         public init(
             id: String,
             name: String,
-            schema: FeatureSchema = .boolean,
+            schema: FeatureSchema = .boolean(default: true),
             optional: Bool = true,
             enabledByDefault: Bool = true
         ) {
@@ -118,7 +118,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
 
     private static func parseFeature(_ obj: [String: Any]) -> Feature? {
         guard let id = obj["id"] as? String, let name = obj["name"] as? String else { return nil }
-        let schema = parseFeatureSchema(obj["schema"]) ?? .boolean
+        let schema = parseFeatureSchema(obj["schema"]) ?? .boolean(default: false)
         let enabledByDefault = (obj["enabled_by_default"] as? Bool) ?? true
         return Feature(id: id, name: name, schema: schema, enabledByDefault: enabledByDefault)
     }

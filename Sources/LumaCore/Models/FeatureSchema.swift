@@ -1,7 +1,7 @@
 import Foundation
 
 public enum FeatureSchema: Sendable, Equatable {
-    case boolean
+    case boolean(default: Bool)
     case int(default: Int64, min: Int64?, max: Int64?)
     case uint(default: UInt64, min: UInt64?, max: UInt64?)
     case double(default: Double, min: Double?, max: Double?)
@@ -13,7 +13,7 @@ public enum FeatureSchema: Sendable, Equatable {
 
     public var defaultValue: FeatureValue {
         switch self {
-        case .boolean: return .boolean(true)
+        case .boolean(let d): return .boolean(d)
         case .int(let d, _, _): return .int(d)
         case .uint(let d, _, _): return .uint(d)
         case .double(let d, _, _): return .double(d)
@@ -93,7 +93,7 @@ public enum ArrayItemSchema: Sendable, Equatable {
 
     public var asFeatureSchema: FeatureSchema {
         switch self {
-        case .boolean: return .boolean
+        case .boolean: return .boolean(default: false)
         case .int: return .int(default: 0, min: nil, max: nil)
         case .uint: return .uint(default: 0, min: nil, max: nil)
         case .double: return .double(default: 0, min: nil, max: nil)
@@ -133,7 +133,7 @@ extension FeatureSchema: Codable {
         let kind = try c.decode(Kind.self, forKey: .kind)
         switch kind {
         case .boolean:
-            self = .boolean
+            self = .boolean(default: try c.decodeIfPresent(Bool.self, forKey: .default) ?? false)
         case .int:
             self = .int(
                 default: try c.decode(Int64.self, forKey: .default),
@@ -174,8 +174,9 @@ extension FeatureSchema: Codable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .boolean:
+        case .boolean(let d):
             try c.encode(Kind.boolean, forKey: .kind)
+            try c.encode(d, forKey: .default)
         case .int(let d, let lo, let hi):
             try c.encode(Kind.int, forKey: .kind)
             try c.encode(d, forKey: .default)

@@ -34,7 +34,7 @@ struct CustomInstrumentSchemaEditor: View {
     private var schemaFields: some View {
         switch schema {
         case .boolean:
-            EmptyView()
+            booleanDefaultField
         case .int:
             intFields(signed: true)
         case .uint:
@@ -51,6 +51,16 @@ struct CustomInstrumentSchemaEditor: View {
             objectFields
         case .array:
             arrayFields
+        }
+    }
+
+    private var booleanDefaultField: some View {
+        HStack(spacing: 8) {
+            Text("Default").frame(width: 80, alignment: .leading)
+            Toggle("", isOn: booleanDefaultBinding)
+                .platformCheckboxToggleStyle()
+                .labelsHidden()
+            Spacer()
         }
     }
 
@@ -161,6 +171,16 @@ struct CustomInstrumentSchemaEditor: View {
                 }
             }
         }
+    }
+
+    private var booleanDefaultBinding: Binding<Bool> {
+        Binding(
+            get: {
+                if case .boolean(let d) = schema { return d }
+                return false
+            },
+            set: { schema = .boolean(default: $0) }
+        )
     }
 
     private var intDefaultBinding: Binding<Int64> {
@@ -518,7 +538,7 @@ struct ObjectFieldsEditor: View {
 
     private func fieldBinding(at index: Int) -> Binding<ObjectField> {
         Binding(
-            get: { index < fields.count ? fields[index] : ObjectField(id: "", name: "", schema: .boolean) },
+            get: { index < fields.count ? fields[index] : ObjectField(id: "", name: "", schema: .boolean(default: false)) },
             set: { newValue in
                 if index < fields.count {
                     fields[index] = newValue
@@ -570,16 +590,12 @@ private struct ObjectFieldRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                if isBooleanSchema {
-                    Image(systemName: "chevron.right").opacity(0)
-                } else {
-                    Button {
-                        expandedID = isExpanded ? nil : field.id
-                    } label: {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    }
-                    .buttonStyle(.borderless)
+                Button {
+                    expandedID = isExpanded ? nil : field.id
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 }
+                .buttonStyle(.borderless)
                 TextField("id", text: $field.id)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 110)
@@ -593,13 +609,15 @@ private struct ObjectFieldRow: View {
                 }
                 .buttonStyle(.borderless)
             }
-            if isExpanded && !isBooleanSchema {
+            if isExpanded {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Optional", isOn: $field.optional)
-                        .platformCheckboxToggleStyle()
-                    if field.optional {
-                        Toggle("Enabled by default", isOn: $field.enabledByDefault)
+                    if !isBooleanSchema {
+                        Toggle("Optional", isOn: $field.optional)
                             .platformCheckboxToggleStyle()
+                        if field.optional {
+                            Toggle("Enabled by default", isOn: $field.enabledByDefault)
+                                .platformCheckboxToggleStyle()
+                        }
                     }
                     CustomInstrumentSchemaEditor(schema: $field.schema)
                 }
@@ -609,11 +627,10 @@ private struct ObjectFieldRow: View {
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.05)))
         .onChange(of: field.schema) { _, newSchema in
-            if case .boolean = newSchema {
-                if field.optional { field.optional = false }
-            } else {
-                expandedID = field.id
+            if case .boolean = newSchema, field.optional {
+                field.optional = false
             }
+            expandedID = field.id
         }
     }
 }
@@ -653,7 +670,7 @@ enum SchemaKind: String, CaseIterable, Identifiable {
 
     func defaultSchema() -> FeatureSchema {
         switch self {
-        case .boolean: return .boolean
+        case .boolean: return .boolean(default: false)
         case .int: return .int(default: 0, min: nil, max: nil)
         case .uint: return .uint(default: 0, min: nil, max: nil)
         case .double: return .double(default: 0, min: nil, max: nil)

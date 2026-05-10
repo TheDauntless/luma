@@ -1766,7 +1766,7 @@ public enum MissionTools {
         return arr.compactMap { obj in
             guard let id = obj["id"] as? String, let name = obj["name"] as? String else { return nil }
             let enabled = (obj["enabled_by_default"] as? Bool) ?? true
-            return CustomInstrumentDef.Feature(id: id, name: name, schema: .boolean, optional: false, enabledByDefault: enabled)
+            return CustomInstrumentDef.Feature(id: id, name: name, schema: .boolean(default: enabled), optional: false, enabledByDefault: enabled)
         }
     }
 

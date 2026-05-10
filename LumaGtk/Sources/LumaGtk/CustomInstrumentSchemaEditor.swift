@@ -52,8 +52,8 @@ final class CustomInstrumentSchemaEditor {
         childEditors.removeAll()
 
         switch schema {
-        case .boolean:
-            break
+        case .boolean(let d):
+            fieldsBox.append(child: booleanDefaultRow(value: d))
         case .int, .uint, .double:
             appendNumericRows()
         case .string(let d):
@@ -83,6 +83,26 @@ final class CustomInstrumentSchemaEditor {
         fieldsBox.append(child: numericRow(label: "Max", initialText: numericMaxText()) { [weak self] text in
             self?.applyNumericMax(text)
         })
+    }
+
+    private func booleanDefaultRow(value: Bool) -> Box {
+        let row = labeledRow("Default")
+        let toggle = Switch()
+        toggle.active = value
+        toggle.valign = .center
+        toggle.onStateSet { [weak self] _, state in
+            MainActor.assumeIsolated {
+                self?.applyBooleanDefault(state)
+                return false
+            }
+        }
+        row.append(child: toggle)
+        return row
+    }
+
+    private func applyBooleanDefault(_ value: Bool) {
+        schema = .boolean(default: value)
+        onChanged(schema)
     }
 
     private func numericRow(label labelText: String, initialText: String, onChange: @escaping (String) -> Void) -> Box {
@@ -560,23 +580,18 @@ final class ObjectFieldsEditor {
         card.append(child: column)
 
         let booleanField = isBoolean(field.schema)
-        let isExpanded = !booleanField && expandedFieldID == field.id
+        let isExpanded = expandedFieldID == field.id
         let initialID = field.id
 
         let chevronButton = Button()
         chevronButton.add(cssClass: "flat")
         chevronButton.set(iconName: isExpanded ? "pan-down-symbolic" : "pan-end-symbolic")
-        if booleanField {
-            chevronButton.opacity = 0
-            chevronButton.sensitive = false
-        } else {
-            chevronButton.onClicked { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, index < self.fields.count else { return }
-                    let currentID = self.fields[index].id
-                    let newID: String? = (self.expandedFieldID == currentID) ? nil : currentID
-                    self.applyExpansion(to: newID)
-                }
+        chevronButton.onClicked { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, index < self.fields.count else { return }
+                let currentID = self.fields[index].id
+                let newID: String? = (self.expandedFieldID == currentID) ? nil : currentID
+                self.applyExpansion(to: newID)
             }
         }
 
@@ -622,11 +637,10 @@ final class ObjectFieldsEditor {
             guard let self, index < self.fields.count else { return }
             let newSchema = kind.defaultSchema()
             self.fields[index].schema = newSchema
-            let nowBoolean = self.isBoolean(newSchema)
-            if nowBoolean, self.fields[index].optional {
+            if self.isBoolean(newSchema), self.fields[index].optional {
                 self.fields[index].optional = false
             }
-            self.expandedFieldID = nowBoolean ? nil : self.fields[index].id
+            self.expandedFieldID = self.fields[index].id
             self.rebuildList()
             self.onChanged(self.fields)
         }
@@ -657,6 +671,7 @@ final class ObjectFieldsEditor {
         let optionalLabel = Label(str: "Optional")
         optionalLabel.halign = .start
         optionalRow.append(child: optionalLabel)
+        optionalRow.visible = !booleanField
 
         let enabledRow = Box(orientation: .horizontal, spacing: 8)
         let enabledToggle = Switch()
@@ -666,7 +681,7 @@ final class ObjectFieldsEditor {
         let enabledLabel = Label(str: "Enabled by default")
         enabledLabel.halign = .start
         enabledRow.append(child: enabledLabel)
-        enabledRow.visible = field.optional
+        enabledRow.visible = !booleanField && field.optional
 
         let editor = CustomInstrumentSchemaEditor(schema: field.schema) { [weak self] updated in
             MainActor.assumeIsolated {
@@ -700,9 +715,7 @@ final class ObjectFieldsEditor {
         body.append(child: editor.widget)
         column.append(child: body)
 
-        if !booleanField {
-            fieldBodies[initialID] = (body, chevronButton)
-        }
+        fieldBodies[initialID] = (body, chevronButton)
 
         return card
     }
@@ -935,7 +948,7 @@ enum SchemaKind: CaseIterable {
 
     func defaultSchema() -> FeatureSchema {
         switch self {
-        case .boolean: return .boolean
+        case .boolean: return .boolean(default: false)
         case .int: return .int(default: 0, min: nil, max: nil)
         case .uint: return .uint(default: 0, min: nil, max: nil)
         case .double: return .double(default: 0, min: nil, max: nil)
