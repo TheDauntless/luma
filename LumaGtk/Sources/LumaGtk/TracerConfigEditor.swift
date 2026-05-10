@@ -26,6 +26,8 @@ final class TracerConfigEditor {
     private var emptyStateSearch: TracerHookSearch?
     private var popoverSearch: TracerHookSearch?
     private var addPopover: Popover?
+    private var compactPill: TracerITracePill?
+    private var tracesObservation: StoreObservation?
 
     private nonisolated(unsafe) let sensorRaw: UnsafeMutableRawPointer
     private var sensorHandlerID: gulong = 0
@@ -81,6 +83,14 @@ final class TracerConfigEditor {
         widget.append(child: contentSlot)
 
         rebuildContent()
+
+        tracesObservation = engine.store.observeAllITraces { [weak self] grouped in
+            Task { @MainActor in
+                guard let self else { return }
+                let traces = grouped[self.sessionID] ?? []
+                self.refreshITracePills(traces: traces)
+            }
+        }
     }
 
     deinit {
@@ -113,6 +123,7 @@ final class TracerConfigEditor {
         hooksList = nil
         editorPane = nil
         emptyStateSearch = nil
+        compactPill = nil
         dismissAddPopover()
         dismissUnsavedChangesDialog()
 
@@ -150,13 +161,18 @@ final class TracerConfigEditor {
             contentSlot.append(child: editorPane.widget)
 
         case .expanded:
+            let captured = selectedHook.map { itraceCaptured(for: $0.id) } ?? 0
             let editorPane = EditorPane(
                 engine: engine,
                 hook: selectedHook,
                 sharedEditor: sharedEditor,
                 showToolbar: true,
+                captured: captured,
                 onSave: { [weak self] updated in
                     self?.saveHook(updated)
+                },
+                onITraceChanged: { [weak self] id, arming in
+                    self?.setITraceArming(id: id, arming: arming)
                 }
             )
             self.editorPane = editorPane
@@ -272,21 +288,14 @@ final class TracerConfigEditor {
             toolbar.append(child: enabledSwitch)
 
             if hook.kind == .function {
-                let itraceSwitch = Switch()
-                itraceSwitch.active = hook.itraceArming != nil
-                itraceSwitch.valign = .center
-                itraceSwitch.tooltipText = "Capture instruction trace for each call"
-                itraceSwitch.onStateSet { [weak self] _, state in
-                    MainActor.assumeIsolated {
-                        guard let self, let id = self.selectedHookID else { return }
-                        self.toggleITrace(id: id, enabled: state)
-                    }
-                    return false
+                let pill = TracerITracePill()
+                pill.update(arming: hook.itraceArming, captured: itraceCaptured(for: hook.id))
+                pill.onArmingChanged = { [weak self] arming in
+                    guard let self, let id = self.selectedHookID else { return }
+                    self.setITraceArming(id: id, arming: arming)
                 }
-                let itraceLabel = Label(str: "ITrace")
-                itraceLabel.add(cssClass: "dim-label")
-                toolbar.append(child: itraceSwitch)
-                toolbar.append(child: itraceLabel)
+                compactPill = pill
+                toolbar.append(child: pill.widget)
             }
         }
 
@@ -473,11 +482,30 @@ final class TracerConfigEditor {
         emit()
     }
 
-    private func toggleITrace(id: UUID, enabled: Bool) {
+    private func setITraceArming(id: UUID, arming: ITraceArming?) {
         guard let idx = config.hooks.firstIndex(where: { $0.id == id }) else { return }
-        let existing = config.hooks[idx].itraceArming
-        config.hooks[idx].itraceArming = enabled ? (existing ?? ITraceArming()) : nil
+        config.hooks[idx].itraceArming = arming
         emit()
+    }
+
+    private func itraceCaptured(for hookID: UUID) -> Int {
+        let traces = engine?.tracesBySession[sessionID] ?? []
+        return capturedCount(in: traces, hookID: hookID)
+    }
+
+    private func capturedCount(in traces: [ITrace], hookID: UUID) -> Int {
+        traces.reduce(into: 0) { count, trace in
+            if case .functionCall(let id, _) = trace.origin, id == hookID { count += 1 }
+        }
+    }
+
+    private func refreshITracePills(traces: [ITrace]) {
+        guard let hookID = selectedHookID,
+            let hook = config.hooks.first(where: { $0.id == hookID })
+        else { return }
+        let captured = capturedCount(in: traces, hookID: hookID)
+        compactPill?.update(arming: hook.itraceArming, captured: captured)
+        editorPane?.refreshITrace(arming: hook.itraceArming, captured: captured)
     }
 
     private func saveHook(_ updated: TracerConfig.Hook) {
@@ -1300,6 +1328,7 @@ final class EditorPane {
 
     private weak var engine: Engine?
     private let onSave: (TracerConfig.Hook) -> Void
+    let onITraceChanged: ((UUID, ITraceArming?) -> Void)?
     var onDirtyChanged: ((Bool) -> Void)?
 
     private var hook: TracerConfig.Hook?
@@ -1311,25 +1340,30 @@ final class EditorPane {
     private var titleLabel: Label?
     private var subtitleLabel: Label?
     private var enabledSwitch: Switch?
-    private var itraceSwitch: Switch?
+    private var itracePill: TracerITracePill?
     private var dirtyIndicator: Image?
     let saveButton: Button?
     private let editorHost: Box
     private let placeholder: Label
     private let monaco: MonacoEditor
+    private let initialCaptured: Int
 
     init(
         engine: Engine?,
         hook: TracerConfig.Hook?,
         sharedEditor: MonacoEditor,
         showToolbar: Bool = true,
-        onSave: @escaping (TracerConfig.Hook) -> Void
+        captured: Int = 0,
+        onSave: @escaping (TracerConfig.Hook) -> Void,
+        onITraceChanged: ((UUID, ITraceArming?) -> Void)? = nil
     ) {
         self.engine = engine
         self.hook = hook
         self.monaco = sharedEditor
         self.showToolbar = showToolbar
         self.onSave = onSave
+        self.onITraceChanged = onITraceChanged
+        self.initialCaptured = captured
 
         widget = Box(orientation: .vertical, spacing: showToolbar ? 8 : 0)
         widget.hexpand = true
@@ -1371,15 +1405,9 @@ final class EditorPane {
             enabledRow.append(child: enabledLabel)
             toolbar.append(child: enabledRow)
 
-            let itraceRow = Box(orientation: .horizontal, spacing: 6)
-            let itraceSwitch = Switch()
-            itraceSwitch.valign = .center
-            itraceSwitch.tooltipText = "Capture instruction trace for each call"
-            self.itraceSwitch = itraceSwitch
-            itraceRow.append(child: itraceSwitch)
-            let itraceLabel = Label(str: "ITrace")
-            itraceRow.append(child: itraceLabel)
-            toolbar.append(child: itraceRow)
+            let pill = TracerITracePill()
+            self.itracePill = pill
+            toolbar.append(child: pill.widget)
 
             let dirtyIndicator = Image(iconName: "media-record-symbolic")
             dirtyIndicator.tooltipText = "Unsaved changes"
@@ -1400,7 +1428,7 @@ final class EditorPane {
             self.titleLabel = nil
             self.subtitleLabel = nil
             self.enabledSwitch = nil
-            self.itraceSwitch = nil
+            self.itracePill = nil
             self.dirtyIndicator = nil
             self.saveButton = nil
         }
@@ -1428,15 +1456,17 @@ final class EditorPane {
         }
 
         if showToolbar {
-            let toggleHandler: (SwitchRef, Bool) -> Bool = { [weak self] _, _ in
+            enabledSwitch?.onStateSet { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.recomputeDirty() }
                 return false
             }
-            enabledSwitch?.onStateSet(handler: toggleHandler)
-            itraceSwitch?.onStateSet(handler: toggleHandler)
-
             saveButton?.onClicked { [weak self] _ in
                 MainActor.assumeIsolated { self?.commit() }
+            }
+            itracePill?.onArmingChanged = { [weak self] arming in
+                guard let self, let id = self.hook?.id else { return }
+                self.hook?.itraceArming = arming
+                self.onITraceChanged?(id, arming)
             }
         }
 
@@ -1456,7 +1486,8 @@ final class EditorPane {
             titleLabel?.label = hook.displayName.isEmpty ? "(unnamed)" : hook.displayName
             subtitleLabel?.label = hook.addressAnchor.displayString
             enabledSwitch?.active = hook.isEnabled
-            itraceSwitch?.active = hook.itraceArming != nil
+            itracePill?.widget.visible = hook.kind == .function
+            itracePill?.update(arming: hook.itraceArming, captured: initialCaptured)
             draftCode = hook.code
             monaco.setText(hook.code)
             isDirty = false
@@ -1473,6 +1504,10 @@ final class EditorPane {
         }
     }
 
+    func refreshITrace(arming: ITraceArming?, captured: Int) {
+        itracePill?.update(arming: arming, captured: captured)
+    }
+
     private func recomputeDirty() {
         guard let hook else {
             isDirty = false
@@ -1482,11 +1517,9 @@ final class EditorPane {
             return
         }
         if showToolbar {
-            let itraceOn = hook.itraceArming != nil
             isDirty =
                 draftCode != hook.code
                 || (enabledSwitch?.active ?? hook.isEnabled) != hook.isEnabled
-                || (itraceSwitch?.active ?? itraceOn) != itraceOn
         } else {
             isDirty = draftCode != hook.code
         }
@@ -1500,8 +1533,6 @@ final class EditorPane {
         hook.code = draftCode
         if showToolbar {
             hook.isEnabled = enabledSwitch?.active ?? hook.isEnabled
-            let itraceOn = itraceSwitch?.active ?? (hook.itraceArming != nil)
-            hook.itraceArming = itraceOn ? (hook.itraceArming ?? ITraceArming()) : nil
         }
         self.hook = hook
         isDirty = false
