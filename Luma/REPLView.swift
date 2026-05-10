@@ -47,7 +47,12 @@ struct REPLView: View {
         if session.lastAttachedAt != nil {
             return "Session detached — use \(session.kind.reestablishLabel) to continue."
         }
-        return "Session not attached — arm it from the banner above."
+        switch session.kind {
+        case .spawn:
+            return "Session not attached — arm it from the banner above."
+        case .attach:
+            return "Session not attached — use \(session.kind.reestablishLabel) from the banner above."
+        }
     }
 
     private var replInactiveHelp: String {
@@ -61,7 +66,12 @@ struct REPLView: View {
         if session.lastAttachedAt != nil {
             return "Detached — re-establish this session before running commands."
         }
-        return "Arm this session to capture the next matching launch."
+        switch session.kind {
+        case .spawn:
+            return "Arm this session to capture the next matching launch."
+        case .attach:
+            return "Re-attach this session to the target process."
+        }
     }
 
     #if canImport(UIKit)
