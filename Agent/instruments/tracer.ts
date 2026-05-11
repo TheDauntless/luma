@@ -14,7 +14,6 @@ interface TracerHookConfig {
     addressAnchor: AnchorJSON;
     isEnabled: boolean;
     code: string;
-    isPinned?: boolean;
     itraceArming?: ITraceArming;
 }
 

@@ -1142,7 +1142,7 @@ public enum MissionTools {
     private static func registerListTracerHooks(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "list_tracer_hooks",
-            description: "List tracer hooks installed on the session. Returns metadata only (id, target, kind, enabled, itrace, pinned). Fetch the JS body via read_tracer_hook when you need it.",
+            description: "List tracer hooks installed on the session. Returns metadata only (id, target, kind, enabled, itrace). Fetch the JS body via read_tracer_hook when you need it.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"}},"required":["session_id"],"additionalProperties":false}
                 """,
@@ -1194,7 +1194,7 @@ public enum MissionTools {
             name: "update_tracer_hook",
             description: "Update one or more fields of a tracer hook. Only fields you pass change. Pass 'code' to swap the JS handler. Pass 'itrace_arming' to arm instruction tracing for this hook with safety caps (max_invocations stops new captures once it's reached; max_bytes_per_invocation auto-stops a single capture once it crosses that many bytes). Pass null to disarm.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"},"code":{"type":"string"},"display_name":{"type":"string"},"is_enabled":{"type":"boolean"},"is_pinned":{"type":"boolean"},"itrace_arming":{"type":["object","null"],"properties":{"max_invocations":{"type":"integer","minimum":1,"default":5},"max_bytes_per_invocation":{"type":"integer","minimum":1024,"default":1000000}},"additionalProperties":false}},"required":["session_id","hook_id"],"additionalProperties":false}
+                {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"},"code":{"type":"string"},"display_name":{"type":"string"},"is_enabled":{"type":"boolean"},"itrace_arming":{"type":["object","null"],"properties":{"max_invocations":{"type":"integer","minimum":1,"default":5},"max_bytes_per_invocation":{"type":"integer","minimum":1024,"default":1000000}},"additionalProperties":false}},"required":["session_id","hook_id"],"additionalProperties":false}
                 """,
             isObserve: false,
             requiresSession: true
@@ -1209,14 +1209,12 @@ public enum MissionTools {
             let code = invocation.args["code"] as? String
             let displayName = invocation.args["display_name"] as? String
             let isEnabled = invocation.args["is_enabled"] as? Bool
-            let isPinned = invocation.args["is_pinned"] as? Bool
             let armingArg = invocation.args["itrace_arming"]
 
             guard let updated = await engine.updateTracerHook(sessionID: sessionID, hookID: hookID, { hook in
                 if let code { hook.code = code }
                 if let displayName { hook.displayName = displayName }
                 if let isEnabled { hook.isEnabled = isEnabled }
-                if let isPinned { hook.isPinned = isPinned }
                 if armingArg is NSNull {
                     hook.itraceArming = nil
                 } else if let armingObj = armingArg as? [String: Any] {
@@ -1237,7 +1235,6 @@ public enum MissionTools {
             "display_name": hook.displayName,
             "kind": hook.kind.rawValue,
             "is_enabled": hook.isEnabled,
-            "is_pinned": hook.isPinned,
         ]
         if let arming = hook.itraceArming {
             entry["itrace_arming"] = [

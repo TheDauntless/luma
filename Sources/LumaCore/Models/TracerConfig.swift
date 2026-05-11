@@ -35,8 +35,6 @@ public struct TracerConfig: Codable, Equatable, Sendable {
 
         public var code: String
 
-        public var isPinned: Bool
-
         public var itraceArming: ITraceArming?
 
         public init(
@@ -46,7 +44,6 @@ public struct TracerConfig: Codable, Equatable, Sendable {
             kind: TracerHookKind,
             isEnabled: Bool = true,
             code: String,
-            isPinned: Bool = false,
             itraceArming: ITraceArming? = nil
         ) {
             self.id = id
@@ -55,7 +52,6 @@ public struct TracerConfig: Codable, Equatable, Sendable {
             self.kind = kind
             self.isEnabled = isEnabled
             self.code = code
-            self.isPinned = isPinned
             self.itraceArming = itraceArming
         }
     }
@@ -85,10 +81,6 @@ public struct TracerConfig: Codable, Equatable, Sendable {
                     "isEnabled": hook.isEnabled,
                     "code": hook.code,
                 ]
-
-                if hook.isPinned {
-                    dict["isPinned"] = true
-                }
 
                 if let arming = hook.itraceArming {
                     dict["itraceArming"] = [

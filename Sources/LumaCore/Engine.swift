@@ -2621,7 +2621,6 @@ public final class Engine {
                 "isEnabled": hook.isEnabled,
                 "code": js,
             ]
-            if hook.isPinned { dict["isPinned"] = true }
             if let arming = hook.itraceArming {
                 dict["itraceArming"] = [
                     "maxInvocations": arming.maxInvocations,
