@@ -275,7 +275,7 @@ struct NewMissionSheet: View {
                 modelsError = nil
             } else {
                 modelsErrorIsMissingKey = false
-                modelsError = "Failed to load models: \(error.localizedDescription)"
+                modelsError = describeModelFetchError(error, baseURL: effectiveBaseURL ?? provider.descriptor.defaultBaseURL)
             }
         }
     }

@@ -261,10 +261,9 @@ final class NewMissionDialog {
         apiKeyHint.add(cssClass: "caption")
         apiKeyHint.add(cssClass: "dim-label")
 
-        let apiKeyChild = Box(orientation: .vertical, spacing: 4)
-        apiKeyChild.append(child: apiKeyEntry)
-        apiKeyChild.append(child: apiKeyHint)
-        apiKeyRow.append(child: formRow(title: "API key", control: apiKeyChild))
+        apiKeyHint.marginStart = 122
+        apiKeyRow.append(child: formRow(title: "API key", control: apiKeyEntry))
+        apiKeyRow.append(child: apiKeyHint)
 
         let checkingSpinner = Gtk.Spinner()
         checkingSpinner.spinning = true
@@ -491,7 +490,12 @@ final class NewMissionDialog {
             } catch {
                 guard self.selectedProviderID == providerID else { return }
                 let hadKey = effectiveKey?.isEmpty == false
-                let label = requiresKey && !hadKey ? "Enter API key to load models" : "Failed to load models"
+                let label: String
+                if requiresKey && !hadKey {
+                    label = "Enter API key to load models"
+                } else {
+                    label = describeModelFetchError(error, baseURL: configuredBaseURL ?? provider.descriptor.defaultBaseURL)
+                }
                 self.setDropdownLabels(self.modelDropdown, labels: [label], selectedIndex: 0)
                 self.refreshStartSensitivity()
                 return

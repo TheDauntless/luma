@@ -52,6 +52,21 @@ public struct OpenAIProvider: LLMProvider {
     }
 }
 
+public func describeModelFetchError(_ error: Error, baseURL: URL?) -> String {
+    if let urlError = error as? URLError {
+        switch urlError.code {
+        case .cannotConnectToHost, .cannotFindHost, .timedOut, .networkConnectionLost, .dnsLookupFailed, .notConnectedToInternet:
+            if let baseURL {
+                return "Could not reach \(baseURL.absoluteString)"
+            }
+            return "Could not reach server"
+        default:
+            break
+        }
+    }
+    return "Failed to load models: \(error.localizedDescription)"
+}
+
 func fetchOpenAICompatibleModels(
     session: URLSession,
     baseURL: URL,
