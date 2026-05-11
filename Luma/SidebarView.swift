@@ -111,6 +111,7 @@ private struct SidebarNotebookRow: View {
         HStack(spacing: 8) {
             Image(systemName: "book.pages")
                 .foregroundStyle(.tint)
+                .frame(width: 18, alignment: .center)
             Text("Notebook")
         }
         .accessibilityElement(children: .combine)
@@ -125,6 +126,7 @@ private struct SidebarMissionsRow: View {
         HStack(spacing: 8) {
             Image(systemName: "scope")
                 .foregroundStyle(.tint)
+                .frame(width: 18, alignment: .center)
             Text("Missions")
             Spacer()
             if count > 0 {
