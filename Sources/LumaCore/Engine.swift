@@ -3712,16 +3712,18 @@ public final class Engine {
         try? store.save(mission)
         collaboration.enqueueMissionUpsert(mission)
         missionExecutor.start(missionID: mission.id)
+        let fallbackModelID = mission.modelID
         Task { @MainActor [weak self] in
-            await self?.generateMissionTitle(missionID: mission.id, providerID: providerID, goal: goal)
+            await self?.generateMissionTitle(missionID: mission.id, providerID: providerID, fallbackModelID: fallbackModelID, goal: goal)
         }
         return mission
     }
 
-    private func generateMissionTitle(missionID: UUID, providerID: String, goal: String) async {
+    private func generateMissionTitle(missionID: UUID, providerID: String, fallbackModelID: String, goal: String) async {
         guard let provider = llmRegistry.provider(id: providerID) else { return }
         let descriptor = provider.descriptor
-        guard let modelID = descriptor.summarizationModelID ?? descriptor.defaultModelID else { return }
+        let modelID = descriptor.summarizationModelID ?? descriptor.defaultModelID ?? fallbackModelID
+        guard !modelID.isEmpty else { return }
 
         var apiKey: String?
         if descriptor.capabilities.requiresAPIKey {
@@ -3747,7 +3749,8 @@ public final class Engine {
 
         var collected = ""
         do {
-            for try await event in provider.streamTurn(request, apiKey: apiKey, baseURL: nil) {
+            let baseURL = LumaAppState.shared.providerBaseURL(providerID: providerID).flatMap(URL.init(string:))
+            for try await event in provider.streamTurn(request, apiKey: apiKey, baseURL: baseURL) {
                 if case .finalMessage(_, let blocks) = event {
                     for block in blocks {
                         if case .text(let t) = block.content {
