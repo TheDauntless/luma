@@ -110,7 +110,6 @@ private struct SidebarNotebookRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "book.pages")
-                .foregroundStyle(.tint)
                 .frame(width: 18, alignment: .center)
             Text("Notebook")
         }
@@ -125,7 +124,6 @@ private struct SidebarMissionsRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "scope")
-                .foregroundStyle(.tint)
                 .frame(width: 18, alignment: .center)
             Text("Missions")
             Spacer()
@@ -239,7 +237,6 @@ private struct SidebarSessionHeaderRow: View {
                     if isArmed {
                         Image(systemName: "scope")
                             .font(.caption2)
-                            .foregroundStyle(.tint)
                             .help("Armed for next matching launch")
                     }
                 }
@@ -670,7 +667,6 @@ struct SidebarCustomInstrumentDefRow: View {
         HStack(spacing: 8) {
             InstrumentIconView(icon: def.icon, pointSize: 16)
                 .frame(width: 18, alignment: .center)
-                .foregroundStyle(.tint)
             Text(def.name)
             Spacer()
         }
@@ -928,7 +924,6 @@ private struct SidebarPackageRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "shippingbox")
-                .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(package.name)
                     .font(.headline)
