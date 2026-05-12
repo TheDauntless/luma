@@ -84,37 +84,43 @@ struct REPLView: View {
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { outerGeo in
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(orderedCells) { cell in
-                                REPLCellView(
-                                    cell: cell,
-                                    processName: session?.processName ?? "",
-                                    sessionID: sessionID,
-                                    engine: engine,
-                                    selection: $selection
-                                )
-                                .id(cell.id)
-                            }
-                        }
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: outerGeo.size.height,
-                            alignment: .bottomLeading
-                        )
+                if orderedCells.isEmpty {
+                    REPLEmptyState()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, horizontalInset)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(orderedCells) { cell in
+                                    REPLCellView(
+                                        cell: cell,
+                                        processName: session?.processName ?? "",
+                                        sessionID: sessionID,
+                                        engine: engine,
+                                        selection: $selection
+                                    )
+                                    .id(cell.id)
+                                }
+                            }
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: outerGeo.size.height,
+                                alignment: .bottomLeading
+                            )
+                            .padding(.horizontal, horizontalInset)
 
-                        Color.clear
-                            .frame(height: 2)
-                            .id("repl-bottom-anchor")
-                    }
-                    .onAppear {
-                        reloadCells()
-                        scrollToBottom(proxy: proxy)
-                    }
-                    .onChange(of: cells.count) {
-                        scrollToBottom(proxy: proxy)
+                            Color.clear
+                                .frame(height: 2)
+                                .id("repl-bottom-anchor")
+                        }
+                        .onAppear {
+                            reloadCells()
+                            scrollToBottom(proxy: proxy)
+                        }
+                        .onChange(of: cells.count) {
+                            scrollToBottom(proxy: proxy)
+                        }
                     }
                 }
             }
@@ -309,6 +315,57 @@ struct REPLView: View {
         } else {
             historyCursor = history.count
             inputCode = ""
+        }
+    }
+}
+
+private struct REPLEmptyState: View {
+    var body: some View {
+        GeometryReader { geo in
+            VStack {
+                Spacer(minLength: 0)
+
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+
+                        Text("Read-Eval-Print Loop")
+                            .font(.title2.weight(.semibold))
+
+                        Text("Evaluate JavaScript in the target process.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                    tips
+                }
+                .padding(.horizontal, 24)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+
+    private var tips: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            tip("Type an expression and press Return to evaluate it.")
+            tip("Step through previous expressions with ↑ and ↓.")
+            tip("Try Process.mainModule.base.readByteArray(64).")
+        }
+        .font(.callout)
+    }
+
+    private func tip(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("•")
+                .foregroundStyle(.secondary)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

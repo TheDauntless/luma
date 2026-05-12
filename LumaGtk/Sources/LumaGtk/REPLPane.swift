@@ -18,8 +18,10 @@ final class REPLPane {
     private var lastBannerError: String?
     private var lastBannerGatingActive: Bool?
     private var lastBannerArmed: Bool?
+    private let contentSlot: Box
     private let cellsBox: Box
     private let cellsScroll: ScrolledWindow
+    private let emptyState: Box
     private let inputEntry: Entry
     private let runButton: Button
     private let timeFormatter: DateFormatter
@@ -66,7 +68,13 @@ final class REPLPane {
         cellsScroll.vexpand = true
         cellsScroll.add(cssClass: "view")
         cellsScroll.set(child: cellsBox)
-        widget.append(child: cellsScroll)
+
+        emptyState = REPLPane.makeEmptyState()
+
+        contentSlot = Box(orientation: .vertical, spacing: 0)
+        contentSlot.hexpand = true
+        contentSlot.vexpand = true
+        widget.append(child: contentSlot)
 
         widget.append(child: Separator(orientation: .horizontal))
 
@@ -560,19 +568,47 @@ final class REPLPane {
 
     func appendCell(_ cell: LumaCore.REPLCell) {
         guard cell.sessionID == sessionID else { return }
+        let wasEmpty = cells.isEmpty
         cells.append(cell)
         historyCursor = orderedHistory.count
-        cellsBox.append(child: makeRow(for: cell))
-        scrollToBottomSoon()
+        if wasEmpty {
+            refresh()
+        } else {
+            cellsBox.append(child: makeRow(for: cell))
+            scrollToBottomSoon()
+        }
     }
 
     private func refresh() {
         clearChildren(of: cellsBox)
         rowKeepers.removeAll()
+        if cells.isEmpty {
+            showEmptyState()
+            return
+        }
+        showCellList()
         for cell in cells.sorted(by: { $0.timestamp < $1.timestamp }) {
             cellsBox.append(child: makeRow(for: cell))
         }
         scrollToBottomSoon()
+    }
+
+    private func showEmptyState() {
+        if cellsScroll.parent != nil {
+            contentSlot.remove(child: cellsScroll)
+        }
+        if emptyState.parent == nil {
+            contentSlot.append(child: emptyState)
+        }
+    }
+
+    private func showCellList() {
+        if emptyState.parent != nil {
+            contentSlot.remove(child: emptyState)
+        }
+        if cellsScroll.parent == nil {
+            contentSlot.append(child: cellsScroll)
+        }
     }
 
     private func scrollToBottomSoon() {
@@ -811,5 +847,79 @@ final class REPLPane {
             child = current.nextSibling
             container.remove(child: current)
         }
+    }
+
+    private static func makeEmptyState() -> Box {
+        let outer = Box(orientation: .vertical, spacing: 0)
+        outer.hexpand = true
+        outer.vexpand = true
+        outer.halign = .center
+        outer.valign = .center
+
+        let stack = Box(orientation: .vertical, spacing: 24)
+        stack.halign = .center
+        stack.valign = .center
+        stack.marginStart = 24
+        stack.marginEnd = 24
+        stack.marginTop = 24
+        stack.marginBottom = 24
+        stack.add(cssClass: "luma-empty-state")
+
+        let titleGroup = Box(orientation: .vertical, spacing: 8)
+        titleGroup.halign = .center
+
+        let image = Gtk.Image(iconName: "utilities-terminal-symbolic")
+        image.pixelSize = 40
+        image.halign = .center
+        titleGroup.append(child: image)
+
+        let titleLabel = Label(str: "Read-Eval-Print Loop")
+        titleLabel.add(cssClass: "title-2")
+        titleLabel.halign = .center
+        titleGroup.append(child: titleLabel)
+
+        let subtitleLabel = Label(str: "Evaluate JavaScript in the target process.")
+        subtitleLabel.add(cssClass: "dim-label")
+        subtitleLabel.wrap = true
+        subtitleLabel.justify = .center
+        subtitleLabel.halign = .center
+        subtitleLabel.setSizeRequest(width: 360, height: -1)
+        titleGroup.append(child: subtitleLabel)
+
+        stack.append(child: titleGroup)
+
+        let tips = Box(orientation: .vertical, spacing: 8)
+        tips.halign = .center
+
+        for text in [
+            "Type an expression and press Return to evaluate it.",
+            "Step through previous expressions with ↑ and ↓.",
+            "Try Process.mainModule.base.readByteArray(64).",
+        ] {
+            tips.append(child: makeTipRow(text: text))
+        }
+
+        stack.append(child: tips)
+
+        outer.append(child: stack)
+        return outer
+    }
+
+    private static func makeTipRow(text: String) -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        row.halign = .start
+
+        let bullet = Label(str: "•")
+        bullet.valign = .start
+        bullet.add(cssClass: "dim-label")
+        row.append(child: bullet)
+
+        let bodyLabel = Label(str: text)
+        bodyLabel.halign = .start
+        bodyLabel.wrap = true
+        bodyLabel.xalign = 0
+        row.append(child: bodyLabel)
+
+        return row
     }
 }
