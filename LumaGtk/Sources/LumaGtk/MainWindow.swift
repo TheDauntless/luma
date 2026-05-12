@@ -2473,6 +2473,12 @@ final class MainWindow {
                 }
             }
         }
+        MonacoEditor.suspendOverlays()
+        dialog.onClosed { _ in
+            MainActor.assumeIsolated {
+                MonacoEditor.resumeOverlays()
+            }
+        }
         dialog.present(parent: window)
     }
 
