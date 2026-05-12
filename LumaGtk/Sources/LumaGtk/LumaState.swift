@@ -30,11 +30,6 @@ final class LumaState {
         set { stored.eventStreamSashPosition = newValue; persist() }
     }
 
-    var eventStreamCollapsed: Bool {
-        get { stored.eventStreamCollapsed ?? true }
-        set { stored.eventStreamCollapsed = newValue; persist() }
-    }
-
     func saveWindowGeometry(width: Int, height: Int, maximized: Bool) {
         stored.windowWidth = width
         stored.windowHeight = height
@@ -42,12 +37,11 @@ final class LumaState {
         persist()
     }
 
-    func saveSashes(collaboration: Int, eventStream: Int? = nil, eventStreamCollapsed: Bool) {
+    func saveSashes(collaboration: Int, eventStream: Int? = nil) {
         stored.collaborationSashPosition = collaboration
         if let eventStream {
             stored.eventStreamSashPosition = eventStream
         }
-        stored.eventStreamCollapsed = eventStreamCollapsed
         persist()
     }
 
@@ -57,7 +51,6 @@ final class LumaState {
         var windowMaximized: Bool?
         var collaborationSashPosition: Int?
         var eventStreamSashPosition: Int?
-        var eventStreamCollapsed: Bool?
     }
 
     private var stored: Stored

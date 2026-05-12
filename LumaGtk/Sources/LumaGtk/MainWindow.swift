@@ -21,12 +21,12 @@ final class MainWindow {
     private let packagesSection: Box
     private let customInstrumentsList: ListBox = ListBox()
     private var customInstrumentsHeaderLabel: Label!
-    private var customInstrumentsEmptyHint: Label!
     private var customInstrumentDefs: [LumaCore.CustomInstrumentDef] = []
     private var sessionsHeaderLabel: Label!
     private var packagesHeaderLabel: Label!
-    private var sessionsEmptyHint: Label!
-    private var packagesEmptyHint: Label!
+    private var sessionsSection: Box!
+    private var customInstrumentsSection: Box!
+    private var packagesSidebarSection: Box!
     private let notebookListBox: ListBox
     private let notebookRow: ListBoxRow
     private let missionsListBox: ListBox
@@ -234,11 +234,12 @@ final class MainWindow {
         column.hexpand = true
         column.vexpand = true
         self.eventStreamHost = column
-        eventStreamPane.setInitialCollapsed(LumaState.shared.eventStreamCollapsed)
         applyEventStreamLayout()
 
-        eventStreamPane.onCollapsedChanged = { [weak self] _ in
-            self?.applyEventStreamLayout()
+        eventStreamPane.onCollapsedChanged = { [weak self] collapsed in
+            guard let self else { return }
+            self.applyEventStreamLayout()
+            self.engine?.setEventStreamCollapsed(collapsed)
         }
         let toastOverlay = ToastOverlay(content: column)
         self.toastOverlay = toastOverlay
@@ -362,16 +363,10 @@ final class MainWindow {
             height: Int(height),
             maximized: window.isMaximized
         )
-        let eventStreamSash: Int?
-        if eventStreamPane.collapsed {
-            eventStreamSash = nil
-        } else {
-            eventStreamSash = Int(eventStreamPaned.position)
-        }
+        let eventStreamSash: Int? = eventStreamPane.collapsed ? nil : Int(eventStreamPaned.position)
         state.saveSashes(
             collaboration: Int(outerPaned.position),
-            eventStream: eventStreamSash,
-            eventStreamCollapsed: eventStreamPane.collapsed
+            eventStream: eventStreamSash
         )
     }
 
@@ -411,6 +406,8 @@ final class MainWindow {
 
     func attach(engine: Engine) {
         self.engine = engine
+        eventStreamPane.setInitialCollapsed(engine.projectUIState.isEventStreamCollapsed)
+        applyEventStreamLayout()
         engine.onSessionListChanged = { [weak self] change in self?.handleSessionListChange(change) }
         engine.onREPLCellAdded = { [weak self] cell in self?.currentREPLPane?.appendCell(cell) }
         engine.onNotebookChanged = { [weak self] change in
@@ -611,7 +608,7 @@ final class MainWindow {
     // MARK: - Sidebar build
 
     private func buildSidebar() -> ScrolledWindow {
-        let column = Box(orientation: .vertical, spacing: 8)
+        let column = Box(orientation: .vertical, spacing: 0)
         column.marginTop = 8
         column.marginBottom = 8
         column.hexpand = true
@@ -633,6 +630,7 @@ final class MainWindow {
     private func buildNotebookSection() -> Box {
         notebookListBox.selectionMode = .single
         notebookListBox.add(cssClass: "navigation-sidebar")
+        notebookListBox.add(cssClass: "luma-flush-sidebar-list")
         notebookListBox.onRowActivated { [weak self] _, _ in
             MainActor.assumeIsolated { self?.select(.notebook) }
         }
@@ -662,6 +660,7 @@ final class MainWindow {
     private func buildMissionsSection() -> Box {
         missionsListBox.selectionMode = .single
         missionsListBox.add(cssClass: "navigation-sidebar")
+        missionsListBox.add(cssClass: "luma-flush-sidebar-list")
         missionsListBox.onRowSelected { [weak self] _, row in
             MainActor.assumeIsolated {
                 guard let self, let row else { return }
@@ -962,18 +961,6 @@ final class MainWindow {
             }
         }
 
-        let body = Box(orientation: .vertical, spacing: 0)
-        let hint = Label(str: "No sessions yet")
-        hint.halign = .start
-        hint.marginStart = 16
-        hint.marginEnd = 12
-        hint.marginTop = 4
-        hint.marginBottom = 8
-        hint.add(cssClass: "dim-label")
-        sessionsEmptyHint = hint
-        body.append(child: hint)
-        body.append(child: sessionsList)
-
         let headerLabel = Label(str: "SESSIONS (0)")
         headerLabel.halign = .start
         headerLabel.add(cssClass: "caption-heading")
@@ -982,13 +969,16 @@ final class MainWindow {
 
         let expander = Expander(label: "")
         expander.set(labelWidget: headerLabel)
-        expander.set(child: body)
+        expander.set(child: sessionsList)
         expander.expanded = true
         expander.marginStart = 4
         expander.marginEnd = 4
 
         let column = Box(orientation: .vertical, spacing: 0)
+        column.marginTop = 12
         column.append(child: expander)
+        column.visible = false
+        sessionsSection = column
         return column
     }
 
@@ -1004,18 +994,6 @@ final class MainWindow {
             }
         }
 
-        let body = Box(orientation: .vertical, spacing: 0)
-        let hint = Label(str: "No custom instruments yet")
-        hint.halign = .start
-        hint.marginStart = 16
-        hint.marginEnd = 12
-        hint.marginTop = 4
-        hint.marginBottom = 8
-        hint.add(cssClass: "dim-label")
-        customInstrumentsEmptyHint = hint
-        body.append(child: hint)
-        body.append(child: customInstrumentsList)
-
         let headerLabel = Label(str: "CUSTOM INSTRUMENTS (0)")
         headerLabel.halign = .start
         headerLabel.add(cssClass: "caption-heading")
@@ -1024,13 +1002,16 @@ final class MainWindow {
 
         let expander = Expander(label: "")
         expander.set(labelWidget: headerLabel)
-        expander.set(child: body)
+        expander.set(child: customInstrumentsList)
         expander.expanded = true
         expander.marginStart = 4
         expander.marginEnd = 4
 
         let column = Box(orientation: .vertical, spacing: 0)
+        column.marginTop = 12
         column.append(child: expander)
+        column.visible = false
+        customInstrumentsSection = column
         return column
     }
 
@@ -1061,8 +1042,7 @@ final class MainWindow {
             customInstrumentsList.append(child: row)
         }
         customInstrumentsHeaderLabel?.label = "CUSTOM INSTRUMENTS (\(defs.count))"
-        customInstrumentsEmptyHint?.visible = defs.isEmpty
-        customInstrumentsList.visible = !defs.isEmpty
+        customInstrumentsSection?.visible = !defs.isEmpty
 
         if case .customInstrumentDef(let id) = selection,
             !defs.contains(where: { $0.id == id })
@@ -1220,18 +1200,6 @@ final class MainWindow {
             }
         }
 
-        let body = Box(orientation: .vertical, spacing: 0)
-        let hint = Label(str: "No packages installed")
-        hint.halign = .start
-        hint.marginStart = 16
-        hint.marginEnd = 12
-        hint.marginTop = 4
-        hint.marginBottom = 8
-        hint.add(cssClass: "dim-label")
-        packagesEmptyHint = hint
-        body.append(child: hint)
-        body.append(child: packagesList)
-
         let headerLabel = Label(str: "PACKAGES (0)")
         headerLabel.halign = .start
         headerLabel.add(cssClass: "caption-heading")
@@ -1240,12 +1208,15 @@ final class MainWindow {
 
         let expander = Expander(label: "")
         expander.set(labelWidget: headerLabel)
-        expander.set(child: body)
+        expander.set(child: packagesList)
         expander.expanded = true
         expander.marginStart = 4
         expander.marginEnd = 4
 
+        packagesSection.marginTop = 12
         packagesSection.append(child: expander)
+        packagesSection.visible = false
+        packagesSidebarSection = packagesSection
         return packagesSection
     }
 
@@ -1924,8 +1895,7 @@ final class MainWindow {
             refreshInstrumentRowVisuals()
         }
         sessionsHeaderLabel?.label = "SESSIONS (\(sessions.count))"
-        sessionsEmptyHint?.visible = sessions.isEmpty
-        sessionsList.visible = !sessions.isEmpty
+        sessionsSection?.visible = !sessions.isEmpty
     }
 
     private func insertSessionRows(_ session: LumaCore.ProcessSession, at sessionIndex: Int) {
@@ -2553,8 +2523,7 @@ final class MainWindow {
             packagesList.append(child: row)
         }
         packagesHeaderLabel?.label = "PACKAGES (\(snapshot.count))"
-        packagesEmptyHint?.visible = snapshot.isEmpty
-        packagesList.visible = !snapshot.isEmpty
+        packagesSidebarSection?.visible = !snapshot.isEmpty
     }
 
     func managePackages() {

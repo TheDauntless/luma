@@ -4,6 +4,10 @@ import Gtk
 @MainActor
 enum StyleSheet {
     static let css = """
+    .luma-flush-sidebar-list {
+        padding: 0;
+    }
+
     .event-stream-pane {
         border-top: 1px solid alpha(@theme_fg_color, 0.18);
     }
