@@ -28,7 +28,7 @@ public final class ProcessNode: Identifiable {
     public private(set) var mainModule: ProcessModule?
     public private(set) var processInfo: ProcessInfo?
 
-    private let device: Device
+    public let device: Device
     private let process: ProcessDetails
     private let session: Session
     private let script: Script
@@ -45,6 +45,7 @@ public final class ProcessNode: Identifiable {
         public var configJSON: Data
         public var state: InstrumentState
         public var attachment: AttachmentState
+        public var incompatibilityReason: String?
 
         public init(
             id: UUID,
@@ -52,7 +53,8 @@ public final class ProcessNode: Identifiable {
             sourceIdentifier: String,
             configJSON: Data,
             state: InstrumentState = .enabled,
-            attachment: AttachmentState = .detached
+            attachment: AttachmentState = .detached,
+            incompatibilityReason: String? = nil
         ) {
             self.id = id
             self.kind = kind
@@ -60,6 +62,7 @@ public final class ProcessNode: Identifiable {
             self.configJSON = configJSON
             self.state = state
             self.attachment = attachment
+            self.incompatibilityReason = incompatibilityReason
         }
     }
 
@@ -1033,12 +1036,20 @@ public final class ProcessNode: Identifiable {
     public func markInstrumentAttached(id: UUID) {
         if let i = instruments.firstIndex(where: { $0.id == id }) {
             instruments[i].attachment = .attached
+            instruments[i].incompatibilityReason = nil
         }
     }
 
     public func markInstrumentDetached(id: UUID) {
         if let i = instruments.firstIndex(where: { $0.id == id }) {
             instruments[i].attachment = .detached
+        }
+    }
+
+    public func markInstrumentIncompatible(id: UUID, reason: String) {
+        if let i = instruments.firstIndex(where: { $0.id == id }) {
+            instruments[i].attachment = .detached
+            instruments[i].incompatibilityReason = reason
         }
     }
 

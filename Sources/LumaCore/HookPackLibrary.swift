@@ -38,6 +38,7 @@ public final class HookPackLibrary {
                 sourceIdentifier: packID,
                 displayName: displayName,
                 icon: icon,
+                compatibility: pack.manifest.compatibility,
                 makeInitialConfigJSON: {
                     HookPackConfig(packId: packID, features: initialFeatures).encode()
                 }

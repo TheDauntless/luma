@@ -7,6 +7,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     public var id: UUID
     public var name: String
     public var icon: InstrumentIcon
+    public var compatibility: InstrumentCompatibility
     public var source: String
     public var features: [Feature]
     public var widgets: [InstrumentWidget]
@@ -39,6 +40,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         id: UUID = UUID(),
         name: String,
         icon: InstrumentIcon = .symbolic(InstrumentIconCatalog.default.id),
+        compatibility: InstrumentCompatibility = .universal,
         source: String = CustomInstrumentDef.exampleSource,
         features: [Feature] = [],
         widgets: [InstrumentWidget] = [],
@@ -48,6 +50,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         self.id = id
         self.name = name
         self.icon = icon
+        self.compatibility = compatibility
         self.source = source
         self.features = features
         self.widgets = widgets
@@ -59,6 +62,8 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         id = UUID(uuidString: row["id"])!
         name = row["name"]
         icon = InstrumentIcon.decodedJSONString(row["icon"])
+        let compatibilityJSON: String = row["compatibility_json"]
+        compatibility = try JSONDecoder().decode(InstrumentCompatibility.self, from: Data(compatibilityJSON.utf8))
         source = row["source"]
         let featuresJSON: String = row["features_json"]
         features = try JSONDecoder().decode([Feature].self, from: Data(featuresJSON.utf8))
@@ -72,6 +77,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
         container["id"] = id.uuidString
         container["name"] = name
         container["icon"] = icon.encodedJSONString()
+        container["compatibility_json"] = compatibilityJSONString
         container["source"] = source
         container["features_json"] = featuresJSONString
         container["widgets_json"] = widgetsJSONString
@@ -80,7 +86,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     }
 
     public func toJSON() -> [String: Any] {
-        [
+        var out: [String: Any] = [
             "id": id.uuidString,
             "name": name,
             "icon": icon.toJSON(),
@@ -90,6 +96,10 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             "created_at": ISO8601DateFormatter().string(from: createdAt),
             "updated_at": ISO8601DateFormatter().string(from: updatedAt),
         ]
+        if let obj = compatibilityJSONObject {
+            out["compatibility"] = obj
+        }
+        return out
     }
 
     public static func fromJSON(_ obj: [String: Any]) -> CustomInstrumentDef? {
@@ -98,6 +108,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             let icon = InstrumentIcon.fromJSON(obj["icon"]),
             let source = obj["source"] as? String
         else { return nil }
+        let compatibility = parseCompatibility(obj["compatibility"])
         let features = parseFeatures(obj["features"])
         let widgets = parseWidgets(obj["widgets"])
         let isoFmt = ISO8601DateFormatter()
@@ -107,6 +118,7 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
             id: id,
             name: name,
             icon: icon,
+            compatibility: compatibility,
             source: source,
             features: features,
             widgets: widgets,
@@ -123,6 +135,27 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
     private var widgetsJSONString: String {
         let data = try! JSONEncoder().encode(widgets)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private var compatibilityJSONString: String {
+        let data = try! JSONEncoder().encode(compatibility)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private var compatibilityJSONObject: [String: Any]? {
+        guard !compatibility.isUniversal else { return nil }
+        let data = try! JSONEncoder().encode(compatibility)
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func parseCompatibility(_ raw: Any?) -> InstrumentCompatibility {
+        guard let obj = raw as? [String: Any],
+            let data = try? JSONSerialization.data(withJSONObject: obj),
+            let decoded = try? JSONDecoder().decode(InstrumentCompatibility.self, from: data)
+        else {
+            return .universal
+        }
+        return decoded
     }
 
     private var widgetsJSONArray: [Any] {

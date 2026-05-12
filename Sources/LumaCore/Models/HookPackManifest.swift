@@ -31,6 +31,7 @@ public struct HookPackManifest: Codable, Sendable, Equatable {
 
     public var name: String
     public var icon: Icon?
+    public var compatibility: InstrumentCompatibility
     public var entry: String
     public var features: [CustomInstrumentDef.Feature]
     public var widgets: [InstrumentWidget]
@@ -38,14 +39,42 @@ public struct HookPackManifest: Codable, Sendable, Equatable {
     public init(
         name: String,
         icon: Icon?,
+        compatibility: InstrumentCompatibility = .universal,
         entry: String,
         features: [CustomInstrumentDef.Feature],
         widgets: [InstrumentWidget]
     ) {
         self.name = name
         self.icon = icon
+        self.compatibility = compatibility
         self.entry = entry
         self.features = features
         self.widgets = widgets
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, icon, compatibility, entry, features, widgets
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        icon = try c.decodeIfPresent(Icon.self, forKey: .icon)
+        compatibility = try c.decodeIfPresent(InstrumentCompatibility.self, forKey: .compatibility) ?? .universal
+        entry = try c.decode(String.self, forKey: .entry)
+        features = try c.decodeIfPresent([CustomInstrumentDef.Feature].self, forKey: .features) ?? []
+        widgets = try c.decodeIfPresent([InstrumentWidget].self, forKey: .widgets) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(icon, forKey: .icon)
+        if !compatibility.isUniversal {
+            try c.encode(compatibility, forKey: .compatibility)
+        }
+        try c.encode(entry, forKey: .entry)
+        try c.encode(features, forKey: .features)
+        try c.encode(widgets, forKey: .widgets)
     }
 }

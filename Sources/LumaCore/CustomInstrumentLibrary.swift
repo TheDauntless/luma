@@ -55,6 +55,7 @@ public final class CustomInstrumentLibrary {
             sourceIdentifier: defID.uuidString,
             displayName: def.name,
             icon: def.icon,
+            compatibility: def.compatibility,
             makeInitialConfigJSON: {
                 CustomInstrumentConfig(defID: defID, features: initialFeatures).encode()
             }

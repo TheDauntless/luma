@@ -6,6 +6,7 @@ public struct InstrumentDescriptor: Identifiable, Hashable, Sendable {
     public let sourceIdentifier: String
     public let displayName: String
     public let icon: InstrumentIcon
+    public let compatibility: InstrumentCompatibility
     public let makeInitialConfigJSON: @Sendable () -> Data
     public let summarizeEvent: @Sendable (RuntimeEvent) -> String
 
@@ -15,6 +16,7 @@ public struct InstrumentDescriptor: Identifiable, Hashable, Sendable {
         sourceIdentifier: String,
         displayName: String,
         icon: InstrumentIcon,
+        compatibility: InstrumentCompatibility = .universal,
         makeInitialConfigJSON: @escaping @Sendable () -> Data,
         summarizeEvent: @escaping @Sendable (RuntimeEvent) -> String = { String(describing: $0.payload) }
     ) {
@@ -23,6 +25,7 @@ public struct InstrumentDescriptor: Identifiable, Hashable, Sendable {
         self.sourceIdentifier = sourceIdentifier
         self.displayName = displayName
         self.icon = icon
+        self.compatibility = compatibility
         self.makeInitialConfigJSON = makeInitialConfigJSON
         self.summarizeEvent = summarizeEvent
     }

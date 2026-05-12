@@ -17,6 +17,7 @@ public enum EngineError: Swift.Error, LocalizedError {
 @MainActor
 public final class Engine {
     public let deviceManager = DeviceManager()
+    public let systemParameters = SystemParametersCache()
     public let store: ProjectStore
     public let traces: TraceStore
     public let eventStore: EventStore?
@@ -1006,6 +1007,7 @@ public final class Engine {
         deviceChangeWatcher = Task { @MainActor [weak self] in
             guard let self else { return }
             for await snapshot in await self.deviceManager.snapshots() {
+                await self.systemParameters.retain(deviceIDs: Set(snapshot.map(\.id)))
                 for device in snapshot {
                     await self.evaluateGating(forDeviceID: device.id)
                 }
@@ -2282,6 +2284,9 @@ public final class Engine {
 
             case .hookPack:
                 guard let pack = hookPacks.pack(withId: sourceIdentifier) else { return }
+                if await skipIfIncompatible(instanceID: instanceID, compatibility: pack.manifest.compatibility, on: node) {
+                    return
+                }
                 try await loadHookPackInstrument(
                     instanceID: instanceID,
                     pack: pack,
@@ -2302,6 +2307,9 @@ public final class Engine {
                 let cfg = (try? CustomInstrumentConfig.decode(from: configJSON))
                     ?? CustomInstrumentConfig(defID: UUID(uuidString: sourceIdentifier) ?? UUID())
                 guard let def = customInstrumentDef(for: cfg) else { return }
+                if await skipIfIncompatible(instanceID: instanceID, compatibility: def.compatibility, on: node) {
+                    return
+                }
                 try await loadCustomInstrument(
                     instanceID: instanceID,
                     def: def,
@@ -2314,6 +2322,18 @@ public final class Engine {
         } catch {
             print("[Engine] Failed to load instrument \(instanceID.uuidString): \(String(describing: error)))")
         }
+    }
+
+    private func skipIfIncompatible(
+        instanceID: UUID,
+        compatibility: InstrumentCompatibility,
+        on node: ProcessNode
+    ) async -> Bool {
+        guard !compatibility.isUniversal else { return false }
+        guard let params = await systemParameters.parameters(for: node.device) else { return false }
+        guard let reason = compatibility.incompatibilityReason(for: params) else { return false }
+        node.markInstrumentIncompatible(id: instanceID, reason: reason)
+        return true
     }
 
     // MARK: - Tracer Hook
