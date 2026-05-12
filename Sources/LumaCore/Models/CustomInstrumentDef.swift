@@ -263,9 +263,8 @@ public struct CustomInstrumentDef: Codable, Identifiable, Sendable, Equatable, F
                 const bookmarks = new Set<string>();
                 let count = restored.opens.points.length;
 
-                const open = Module.findGlobalExportByName("open");
-                if (open !== null) {
-                    listeners.push(Interceptor.attach(open, {
+                if (Process.platform !== "windows") {
+                    listeners.push(Interceptor.attach(Module.getGlobalExportByName("open"), {
                         onEnter(args) {
                             const path = args[0].readUtf8String()!;
                             ctx.emit({ syscall: "open", path });
