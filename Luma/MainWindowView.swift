@@ -641,6 +641,10 @@ struct ProjectToolbar: ToolbarContent {
                 lastBottomHeight = CGFloat(bottomHeight.wrappedValue)
             }
 
+            // Explicit deinit dodges a swift-frontend EarlyPerfInliner
+            // crash on Xcode 26.4 Release builds.
+            deinit {}
+
             private func syncOutStoredHeight() {
                 let h = Double(lastBottomHeight)
                 let previousBottomHeight = self.bottomHeight

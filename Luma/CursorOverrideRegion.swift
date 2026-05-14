@@ -1,55 +1,62 @@
-import AppKit
 import SwiftUI
 
-struct CursorOverrideRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        CursorOverrideNSView()
-    }
+#if canImport(AppKit)
+    import AppKit
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-private final class CursorOverrideNSView: NSView {
-    private nonisolated(unsafe) var monitor: Any?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window != nil {
-            installMonitor()
-        } else {
-            uninstallMonitor()
+    struct CursorOverrideRegion: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView {
+            CursorOverrideNSView()
         }
+
+        func updateNSView(_ nsView: NSView, context: Context) {}
     }
 
-    deinit {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-        }
-    }
+    private final class CursorOverrideNSView: NSView {
+        private nonisolated(unsafe) var monitor: Any?
 
-    private func installMonitor() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            guard let self,
-                let window = self.window,
-                event.window === window,
-                self.convert(self.bounds, to: nil).contains(event.locationInWindow)
-            else {
-                return event
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil {
+                installMonitor()
+            } else {
+                uninstallMonitor()
             }
-            NSCursor.arrow.set()
-            return nil
+        }
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        private func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+                guard let self,
+                    let window = self.window,
+                    event.window === window,
+                    self.convert(self.bounds, to: nil).contains(event.locationInWindow)
+                else {
+                    return event
+                }
+                NSCursor.arrow.set()
+                return nil
+            }
+        }
+
+        private func uninstallMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
         }
     }
-
-    private func uninstallMonitor() {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        monitor = nil
+#else
+    struct CursorOverrideRegion: View {
+        var body: some View { Color.clear }
     }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-}
+#endif
