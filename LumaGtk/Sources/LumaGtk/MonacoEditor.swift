@@ -11,7 +11,15 @@ public final class MonacoEditor {
     private nonisolated(unsafe) let widgetRawPtr: UnsafeMutableRawPointer
     public var onTextChanged: ((String) -> Void)?
     public private(set) var isReady = false
-    public var onReady: (() -> Void)?
+    private var readyCallbacks: [() -> Void] = []
+
+    public func whenReady(_ callback: @escaping () -> Void) {
+        if isReady {
+            callback()
+        } else {
+            readyCallbacks.append(callback)
+        }
+    }
 
     private let view: OpaquePointer
     private var profile: EditorProfile
@@ -93,12 +101,8 @@ public final class MonacoEditor {
         host.append(child: overlay)
 
         reparent(into: container)
-        if isReady {
+        whenReady {
             spinner.visible = false
-        } else {
-            onReady = { [weak spinner] in
-                spinner?.visible = false
-            }
         }
     }
 
@@ -136,7 +140,11 @@ public final class MonacoEditor {
         isLoaded = true
         evaluate(initialBootstrapScript())
         isReady = true
-        onReady?()
+        let callbacks = readyCallbacks
+        readyCallbacks.removeAll()
+        for callback in callbacks {
+            callback()
+        }
         if wantsFocusOnLoad {
             wantsFocusOnLoad = false
             luma_monaco_view_grab_focus(view)
