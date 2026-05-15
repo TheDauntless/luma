@@ -350,6 +350,9 @@ struct EventStreamView: View {
 
         if bottomY == BottomRowOffsetPreferenceKey.defaultValue { return }
 
+        let minMeaningfulViewportHeight: CGFloat = 80
+        if viewportHeight < minMeaningfulViewportHeight { return }
+
         let threshold: CGFloat = 20
         let distanceFromBottom = bottomY - viewportHeight
         let atBottomNow = distanceFromBottom <= threshold
