@@ -1405,6 +1405,12 @@ public final class Engine {
                 onREPLCellAdded?(cell)
             }
 
+            updateSession(id: s.id) {
+                $0.lastKnownMainModule = nil
+                $0.lastKnownModules = nil
+                $0.lastKnownThreads = nil
+            }
+
             subscribeToNodeStreams(node)
 
             processNodes.append(node)
