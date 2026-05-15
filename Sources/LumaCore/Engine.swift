@@ -891,6 +891,7 @@ public final class Engine {
         updated.deviceName = deviceName
         updated.processName = processName
         updated.lastKnownPID = pid
+        updated.lastKnownMainModule = nil
         updated.lastKnownModules = nil
         updated.lastKnownThreads = nil
         saveSession(updated)
@@ -1416,12 +1417,14 @@ public final class Engine {
             try await script.load()
 
             if let info = await node.fetchProcessInfo() {
+                let mainModule = node.mainModule
                 updateSession(id: s.id) {
                     $0.processInfo = ProcessSession.ProcessInfo(
                         platform: info.platform,
                         arch: info.arch,
                         pointerSize: info.pointerSize
                     )
+                    $0.lastKnownMainModule = mainModule
                 }
             }
 
@@ -2019,6 +2022,7 @@ public final class Engine {
         session.deviceName = device.name
         session.processName = process.name
         session.lastKnownPID = process.pid
+        session.lastKnownMainModule = nil
         session.lastKnownModules = nil
         session.lastKnownThreads = nil
         session.phase = .attaching

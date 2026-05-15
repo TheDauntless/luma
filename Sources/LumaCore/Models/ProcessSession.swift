@@ -24,6 +24,7 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
     public var lastAttachedAt: Date?
 
     public var processInfo: ProcessInfo?
+    public var lastKnownMainModule: ProcessModule?
     public var lastKnownModules: [ProcessModule]?
     public var lastKnownThreads: [ProcessThread]?
 
@@ -44,6 +45,7 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         case lastKnownPID = "last_known_pid"
         case lastAttachedAt = "last_attached_at"
         case processInfo = "process_info"
+        case lastKnownMainModule = "last_known_main_module"
         case lastKnownModules = "last_known_modules"
         case lastKnownThreads = "last_known_threads"
     }
@@ -89,6 +91,7 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         lastKnownPID = try container.decode(UInt.self, forKey: .lastKnownPID)
         lastAttachedAt = try container.decodeIfPresent(Date.self, forKey: .lastAttachedAt)
         processInfo = try container.decodeIfPresent(ProcessInfo.self, forKey: .processInfo)
+        lastKnownMainModule = try container.decodeIfPresent(ProcessModule.self, forKey: .lastKnownMainModule)
         lastKnownModules = try container.decodeIfPresent([ProcessModule].self, forKey: .lastKnownModules)
         lastKnownThreads = try container.decodeIfPresent([ProcessThread].self, forKey: .lastKnownThreads)
     }

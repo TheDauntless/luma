@@ -1058,6 +1058,7 @@ public final class ProjectStore: Sendable {
             t.column("last_known_pid", .integer).notNull()
             t.column("last_attached_at", .datetime)
             t.column("process_info", .blob)
+            t.column("last_known_main_module", .blob)
             t.column("last_known_modules", .blob)
             t.column("last_known_threads", .blob)
         }
