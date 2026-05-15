@@ -55,7 +55,31 @@ extension MonacoEditorProfile {
             jsExtraLibs: profile.jsExtraLibs.map { MonacoExtraLib(from: $0) },
             minimap: profile.minimap,
             fontSize: profile.fontSize,
-            theme: profile.theme == .dark ? .dark : .light
+            theme: .named(profile.theme.name),
+            customThemes: profile.customThemes.map { MonacoCustomTheme(from: $0) }
+        )
+    }
+}
+
+extension MonacoCustomTheme {
+    init(from theme: LumaCore.EditorCustomTheme) {
+        self.init(
+            name: theme.name,
+            base: MonacoBaseTheme(rawValue: theme.base.rawValue) ?? .vs,
+            inherit: theme.inherit,
+            rules: theme.rules.map { MonacoTokenRule(from: $0) },
+            colors: theme.colors
+        )
+    }
+}
+
+extension MonacoTokenRule {
+    init(from rule: LumaCore.EditorTokenRule) {
+        self.init(
+            token: rule.token,
+            foreground: rule.foreground,
+            background: rule.background,
+            fontStyle: rule.fontStyle
         )
     }
 }
