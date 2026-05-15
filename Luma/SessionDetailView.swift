@@ -14,6 +14,8 @@ struct SessionDetailView: View {
     let engine: Engine
     @Binding var selection: SidebarItemID?
 
+    @Environment(\.errorPresenter) private var errorPresenter
+
     private var section: Binding<SessionDetailSection> {
         Binding(
             get: { engine.sessionDetailSection(for: sessionID) },
@@ -101,19 +103,15 @@ struct SessionDetailView: View {
             row("Status", statusText(session: session, node: node))
             row("Device", node?.deviceName ?? session?.deviceName ?? "—")
             row("PID", String(node?.pid ?? session?.lastKnownPID ?? 0))
-            if let info = node?.processInfo {
-                row("Platform", info.platform)
-                row("Architecture", info.arch)
-                row("Pointer size", "\(info.pointerSize) bytes")
-            } else if let info = session?.processInfo {
+            if let info = session?.processInfo {
                 row("Platform", info.platform)
                 row("Architecture", info.arch)
                 row("Pointer size", "\(info.pointerSize) bytes")
             }
-            if let main = node?.mainModule {
+            if let main = session?.lastKnownMainModule {
                 row("Main module", main.name)
                 row("Path", main.path)
-                row("Base", String(format: "0x%llx", main.base))
+                baseRow(address: main.base)
                 row("Size", "\(main.size) bytes")
             }
         }
@@ -146,8 +144,21 @@ struct SessionDetailView: View {
         }
     }
 
+    private func baseRow(address: UInt64) -> some View {
+        GridRow {
+            Text("Base")
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.leading)
+            HStack(spacing: 6) {
+                Text(String(format: "0x%llx", address))
+                    .textSelection(.enabled)
+                openMemoryButton(address: address)
+            }
+        }
+    }
+
     private var modulesContent: some View {
-        let modules = (node?.modules ?? []).sorted(by: { $0.base < $1.base })
+        let modules = (session?.lastKnownModules ?? []).sorted(by: { $0.base < $1.base })
         return PlatformHSplit {
             modulesTable(modules)
                 .frame(minWidth: 240, idealWidth: 360)
@@ -184,19 +195,22 @@ struct SessionDetailView: View {
                             .font(.system(.body, design: .monospaced))
                     }
                 }
+                .contextMenu(forSelectionType: ProcessModule.ID.self) { ids in
+                    if let id = ids.first, let module = modules.first(where: { $0.id == id }) {
+                        openMemoryMenuItem(address: module.base)
+                    }
+                }
             }
         }
     }
 
     private var currentSelectedModule: ProcessModule? {
         guard let id = selectedModuleID.wrappedValue else { return nil }
-        return node?.modules.first(where: { $0.id == id })
+        return session?.lastKnownModules?.first(where: { $0.id == id })
     }
 
     private var displayedThreads: [ProcessThread] {
-        let live = node?.threads ?? []
-        let source = live.isEmpty ? (session?.lastKnownThreads ?? []) : live
-        return source.sorted(by: { $0.id < $1.id })
+        (session?.lastKnownThreads ?? []).sorted(by: { $0.id < $1.id })
     }
 
     private var threadsContent: some View {
@@ -265,6 +279,41 @@ struct SessionDetailView: View {
                 } else {
                     Text(action.title)
                 }
+            }
+        }
+    }
+
+    private func openMemoryButton(address: UInt64) -> some View {
+        Button {
+            openMemoryInsight(at: address)
+        } label: {
+            Image(systemName: "doc.text.magnifyingglass")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Open Memory")
+    }
+
+    @ViewBuilder
+    private func openMemoryMenuItem(address: UInt64) -> some View {
+        Button {
+            openMemoryInsight(at: address)
+        } label: {
+            Label("Open Memory", systemImage: "doc.text.magnifyingglass")
+        }
+    }
+
+    private func openMemoryInsight(at address: UInt64) {
+        Task { @MainActor in
+            do {
+                let insight = try engine.getOrCreateInsight(
+                    sessionID: sessionID,
+                    pointer: address,
+                    kind: .memory
+                )
+                selection = .insight(sessionID, insight.id)
+            } catch {
+                errorPresenter.present("Can’t open memory", error.localizedDescription)
             }
         }
     }

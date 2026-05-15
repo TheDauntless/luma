@@ -325,7 +325,7 @@ final class SessionDetailView {
         if let main = node?.mainModule {
             appendSummary(label: "Main module", value: main.name)
             appendSummary(label: "Path", value: main.path)
-            appendSummary(label: "Base", value: String(format: "0x%llx", main.base))
+            appendBaseSummary(address: main.base)
             appendSummary(label: "Size", value: "\(main.size) bytes")
         }
     }
@@ -367,6 +367,33 @@ final class SessionDetailView {
         summaryBox.append(child: row)
     }
 
+    private func appendBaseSummary(address: UInt64) {
+        let row = Box(orientation: .horizontal, spacing: 12)
+
+        let key = Label(str: "Base")
+        key.halign = .start
+        key.xalign = 0
+        key.add(cssClass: "dim-label")
+        summaryKeyGroup.add(widget: key)
+
+        let val = Label(str: String(format: "0x%llx", address))
+        val.halign = .start
+        val.selectable = true
+        val.xalign = 0
+
+        let openButton = makeOpenMemoryButton(address: address)
+
+        let valueRow = Box(orientation: .horizontal, spacing: 6)
+        valueRow.hexpand = true
+        valueRow.halign = .start
+        valueRow.append(child: val)
+        valueRow.append(child: openButton)
+
+        row.append(child: key)
+        row.append(child: valueRow)
+        summaryBox.append(child: row)
+    }
+
     private func renderModules(_ modules: [LumaCore.ProcessModule]) {
         let sorted = modules.sorted(by: { $0.base < $1.base })
         currentSortedModules = sorted
@@ -384,6 +411,7 @@ final class SessionDetailView {
             row.set(title: module.name)
             row.set(subtitle: String(format: "0x%llx · %@ bytes", module.base, formatNumber(module.size)))
             modulesList.append(child: row)
+            attachModuleContextMenu(to: row, module: module)
         }
     }
 
@@ -428,6 +456,23 @@ final class SessionDetailView {
         threadDetailContainer.append(child: pane.widget)
     }
 
+    private func attachModuleContextMenu(to anchor: Widget, module: LumaCore.ProcessModule) {
+        let address = module.base
+        let gesture = GestureClick()
+        gesture.set(button: 3)
+        gesture.propagationPhase = GTK_PHASE_CAPTURE
+        gesture.onPressed { [weak self, anchor] _, _, x, y in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let item = ContextMenu.Item("Open Memory") {
+                    self.openMemoryInsight(address: address)
+                }
+                ContextMenu.present([[item]], at: anchor, x: x, y: y)
+            }
+        }
+        anchor.install(controller: gesture)
+    }
+
     private func attachThreadContextMenu(to anchor: Widget, thread: LumaCore.ProcessThread) {
         guard let engine else { return }
         let actions = engine.threadActions(sessionID: sessionID, thread: thread)
@@ -451,6 +496,36 @@ final class SessionDetailView {
             }
         }
         anchor.install(controller: gesture)
+    }
+
+    private func makeOpenMemoryButton(address: UInt64) -> Image {
+        let icon = Image(iconName: "edit-find-symbolic")
+        icon.pixelSize = 14
+        icon.tooltipText = "Open Memory"
+        icon.valign = .center
+        icon.add(cssClass: "dim-label")
+
+        let click = GestureClick()
+        click.set(button: 1)
+        click.onReleased { [weak self] _, _, _, _ in
+            MainActor.assumeIsolated {
+                self?.openMemoryInsight(address: address)
+            }
+        }
+        icon.install(controller: click)
+
+        return icon
+    }
+
+    private func openMemoryInsight(address: UInt64) {
+        guard let engine else { return }
+        AddressActionMenu.openInsight(
+            engine: engine,
+            sessionID: sessionID,
+            address: address,
+            kind: .memory,
+            failureLabel: "Can\u{2019}t open memory"
+        )
     }
 
     private func makeEmptyRow(text: String) -> ListBoxRow {
