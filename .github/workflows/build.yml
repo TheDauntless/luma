@@ -1487,16 +1487,9 @@ jobs:
               $env:USE_SYSTEM_FRIDA = "1"
               $env:GIO_EXTRA_MODULES = "V:\plugins\glib-networking"
               swift run --package-path . luma-bundle-compiler `
+                  --config       (Join-Path (Get-Location) 'Agent\bundle.json') `
                   --project-root (Get-Location) `
-                  --swift-out    (Join-Path (Get-Location) 'Sources\LumaCore\Generated\LumaAgent.swift') `
-                  --staging-dir  (Join-Path (Get-Location) '.build\AgentStaging') `
-                  --package frida-itrace@6.1.0 `
-                  --package frida-java-bridge@7.0.12 `
-                  --external frida-java-bridge `
-                  --agent  core      Agent/core/luma.ts `
-                  --agent  drain     Agent/instruments/drain-agent.ts `
-                  --module tracer    Agent/instruments/tracer.ts `
-                  --module codeShare Agent/instruments/codeshare.ts
+                  --staging-dir  (Join-Path (Get-Location) '.build\AgentStaging')
               if ($LASTEXITCODE -ne 0) { throw "luma-bundle-compiler failed ($LASTEXITCODE)" }
               cd LumaGtk
               swift build -c release `

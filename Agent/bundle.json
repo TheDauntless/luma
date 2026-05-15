@@ -1,0 +1,21 @@
+{
+  "output": {
+    "agent": "../Sources/LumaCore/Generated/LumaAgent.swift",
+    "typings": "../Sources/LumaCore/Generated/LumaTypings.swift"
+  },
+  "input": {
+    "bundles": [
+      { "name": "core",      "kind": "agent",  "entrypoint": "Agent/core/luma.ts" },
+      { "name": "drain",     "kind": "agent",  "entrypoint": "Agent/instruments/drain-agent.ts" },
+      { "name": "tracer",    "kind": "module", "entrypoint": "Agent/instruments/tracer.ts" },
+      { "name": "codeShare", "kind": "module", "entrypoint": "Agent/instruments/codeshare.ts" }
+    ],
+    "typings": [
+      { "name": "fridaGum", "package": "@types/frida-gum" },
+      { "name": "node",     "package": "@types/node" }
+    ],
+    "externals": [
+      "frida-java-bridge"
+    ]
+  }
+}

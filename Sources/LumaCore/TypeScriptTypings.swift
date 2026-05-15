@@ -1,5 +1,3 @@
-import Foundation
-
 public struct TypeScriptTypingFile: Sendable, Equatable {
     public let filePath: String
     public let content: String
@@ -11,10 +9,6 @@ public struct TypeScriptTypingFile: Sendable, Equatable {
 }
 
 public enum TypeScriptTypings {
-    public static let fridaGum: TypeScriptTypingFile? = {
-        guard let url = Bundle.module.url(forResource: "frida-gum", withExtension: "d.ts"),
-            let content = try? String(contentsOf: url, encoding: .utf8)
-        else { return nil }
-        return TypeScriptTypingFile(filePath: "@types/frida-gum/index.d.ts", content: content)
-    }()
+    public static var fridaGum: [TypeScriptTypingFile] { LumaTypings.fridaGum }
+    public static var node: [TypeScriptTypingFile] { LumaTypings.node }
 }

@@ -1881,11 +1881,9 @@ public enum MissionTools {
             guard let query = (invocation.args["query"] as? String)?.trimmingCharacters(in: .whitespaces), !query.isEmpty else {
                 return errorResult("missing query", code: .invalidInput)
             }
-            guard let typings = TypeScriptTypings.fridaGum else {
-                return errorResult("Frida API reference unavailable in this build", code: .unavailable)
-            }
+            let fridaGumSource = TypeScriptTypings.fridaGum.map(\.content).joined(separator: "\n")
             let cap = (invocation.args["max_matches"] as? Int) ?? 12
-            let matches = searchFridaDeclarations(in: typings.content, query: query, limit: cap)
+            let matches = searchFridaDeclarations(in: fridaGumSource, query: query, limit: cap)
             let payload: [String: Any] = [
                 "query": query,
                 "match_count": matches.count,

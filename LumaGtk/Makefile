@@ -14,26 +14,20 @@ export USE_SYSTEM_FRIDA := 1
 
 PROJECT_ROOT := $(abspath ..)
 AGENT_BUNDLE := $(PROJECT_ROOT)/Sources/LumaCore/Generated/LumaAgent.swift
+TYPINGS_BUNDLE := $(PROJECT_ROOT)/Sources/LumaCore/Generated/LumaTypings.swift
 AGENT_STAGING := $(PROJECT_ROOT)/.build/AgentStaging
 
 AGENT_SOURCES := \
 	$(shell find $(PROJECT_ROOT)/Agent -type f \( -name '*.ts' -o -name '*.json' \) 2>/dev/null) \
 	$(PROJECT_ROOT)/Sources/LumaBundleCompiler/main.swift
 
-bundle: $(AGENT_BUNDLE)
+bundle: $(AGENT_BUNDLE) $(TYPINGS_BUNDLE)
 
-$(AGENT_BUNDLE): $(AGENT_SOURCES)
+$(AGENT_BUNDLE) $(TYPINGS_BUNDLE) &: $(AGENT_SOURCES) $(PROJECT_ROOT)/Agent/bundle.json
 	swift run --package-path $(PROJECT_ROOT) luma-bundle-compiler \
+	    --config       "$(PROJECT_ROOT)/Agent/bundle.json" \
 	    --project-root "$(PROJECT_ROOT)" \
-	    --swift-out    "$(AGENT_BUNDLE)" \
-	    --staging-dir  "$(AGENT_STAGING)" \
-	    --package frida-itrace@6.1.0 \
-	    --package frida-java-bridge@7.0.12 \
-	    --external frida-java-bridge \
-	    --agent  core      Agent/core/luma.ts \
-	    --agent  drain     Agent/instruments/drain-agent.ts \
-	    --module tracer    Agent/instruments/tracer.ts \
-	    --module codeShare Agent/instruments/codeshare.ts
+	    --staging-dir  "$(AGENT_STAGING)"
 
 build: bundle
 	swift build $(SWIFT_BUILD_FLAGS)

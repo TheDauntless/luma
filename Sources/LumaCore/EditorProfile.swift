@@ -388,12 +388,13 @@ extension EditorProfile {
         strict: true
     )
 
-    /// The bundled `frida-gum` declaration file as an extra lib, or nil
-    /// if the resource could not be loaded.
-    public static let fridaGumLib: EditorExtraLib? = {
-        guard let typing = TypeScriptTypings.fridaGum else { return nil }
-        return EditorExtraLib(content: typing.content, filePath: typing.filePath)
-    }()
+    public static let fridaGumLibs: [EditorExtraLib] = TypeScriptTypings.fridaGum.map {
+        EditorExtraLib(content: $0.content, filePath: $0.filePath)
+    }
+
+    public static let nodeLibs: [EditorExtraLib] = TypeScriptTypings.node.map {
+        EditorExtraLib(content: $0.content, filePath: $0.filePath)
+    }
 
     /// Profile for the tracer hook editor: TypeScript with Frida defaults,
     /// the gum typings, the tracer-handler ambient declarations, and any
@@ -410,9 +411,8 @@ extension EditorProfile {
             tsCompilerOptions: fridaCompilerOptions,
             customThemes: [.gitHubLight, .gitHubDark]
         )
-        if let gum = fridaGumLib {
-            profile.tsExtraLibs.append(gum)
-        }
+        profile.tsExtraLibs.append(contentsOf: fridaGumLibs)
+        profile.tsExtraLibs.append(contentsOf: nodeLibs)
         profile.tsExtraLibs.append(TracerTypings.handlerLib)
         if let aliases = MonacoPackageAliasTypings.makeLib(packages: packages) {
             profile.tsExtraLibs.append(
@@ -437,9 +437,8 @@ extension EditorProfile {
             jsCompilerOptions: fridaCompilerOptions,
             customThemes: [.gitHubLight, .gitHubDark]
         )
-        if let gum = fridaGumLib {
-            profile.jsExtraLibs.append(gum)
-        }
+        profile.jsExtraLibs.append(contentsOf: fridaGumLibs)
+        profile.jsExtraLibs.append(contentsOf: nodeLibs)
         return profile
     }
 
@@ -469,9 +468,8 @@ extension EditorProfile {
             tsCompilerOptions: fridaCompilerOptions,
             customThemes: [.gitHubLight, .gitHubDark]
         )
-        if let gum = fridaGumLib {
-            profile.tsExtraLibs.append(gum)
-        }
+        profile.tsExtraLibs.append(contentsOf: fridaGumLibs)
+        profile.tsExtraLibs.append(contentsOf: nodeLibs)
         profile.tsExtraLibs.append(CustomInstrumentTypings.ambientLib)
         if let def, let featureMap = CustomInstrumentTypings.featureMapLib(for: def) {
             profile.tsExtraLibs.append(featureMap)

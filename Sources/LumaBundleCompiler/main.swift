@@ -11,7 +11,7 @@ Task {
 _lumaMainGroup.wait()
 
 struct LumaBundleCompiler {
-    enum Kind {
+    enum Kind: String, Decodable {
         case agent
         case module
     }
@@ -28,6 +28,43 @@ struct LumaBundleCompiler {
         let source: String
     }
 
+    struct TypingsEntry {
+        let swiftName: String
+        let packageName: String
+    }
+
+    struct CompiledTypings {
+        let swiftName: String
+        let files: [(filePath: String, content: String)]
+    }
+
+    struct Config: Decodable {
+        struct Output: Decodable {
+            let agent: String
+            let typings: String?
+        }
+
+        struct Input: Decodable {
+            let bundles: [BundleEntry]
+            let typings: [TypingsPackage]
+            let externals: [String]
+        }
+
+        struct BundleEntry: Decodable {
+            let name: String
+            let kind: Kind
+            let entrypoint: String
+        }
+
+        struct TypingsPackage: Decodable {
+            let name: String
+            let package: String
+        }
+
+        let output: Output
+        let input: Input
+    }
+
     static func main() async {
         do {
             try await run()
@@ -42,8 +79,12 @@ struct LumaBundleCompiler {
 
         var projectRoot: String?
         var swiftOutPath: String?
+        var typingsOutPath: String?
         var stagingDir: String?
+        var manifestPath: String?
+        var lockfilePath: String?
         var entries: [Entry] = []
+        var typingsEntries: [TypingsEntry] = []
         var packageSpecs: [String] = []
         var localPackages: [(name: String, path: String)] = []
         var externals: [String] = []
@@ -64,6 +105,21 @@ struct LumaBundleCompiler {
         while !args.isEmpty {
             let flag = args.removeFirst()
             switch flag {
+            case "--config":
+                guard !args.isEmpty else { throw ToolError.usage("Missing value for --config") }
+                let configPath = args.removeFirst()
+                let config = try loadConfig(at: configPath)
+                let configDir = URL(fileURLWithPath: configPath).deletingLastPathComponent()
+                manifestPath = configDir.appendingPathComponent("package.json").path
+                lockfilePath = configDir.appendingPathComponent("package-lock.json").path
+                applyConfig(
+                    config,
+                    swiftOutPath: &swiftOutPath,
+                    typingsOutPath: &typingsOutPath,
+                    entries: &entries,
+                    typingsEntries: &typingsEntries,
+                    externals: &externals)
+
             case "--project-root":
                 guard !args.isEmpty else { throw ToolError.usage("Missing value for --project-root") }
                 projectRoot = args.removeFirst()
@@ -71,6 +127,10 @@ struct LumaBundleCompiler {
             case "--swift-out":
                 guard !args.isEmpty else { throw ToolError.usage("Missing value for --swift-out") }
                 swiftOutPath = args.removeFirst()
+
+            case "--typings-out":
+                guard !args.isEmpty else { throw ToolError.usage("Missing value for --typings-out") }
+                typingsOutPath = args.removeFirst()
 
             case "--staging-dir":
                 guard !args.isEmpty else { throw ToolError.usage("Missing value for --staging-dir") }
@@ -129,10 +189,16 @@ struct LumaBundleCompiler {
             throw ToolError.usage("No --agent or --module entries provided.")
         }
 
+        if !typingsEntries.isEmpty && typingsOutPath == nil {
+            throw ToolError.usage("--typings-out is required when using --typings.")
+        }
+
+        let hasManifest = manifestPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+
         let effectiveProjectRoot: String
-        if !packageSpecs.isEmpty || !localPackages.isEmpty {
+        if !packageSpecs.isEmpty || !localPackages.isEmpty || hasManifest {
             guard let stagingDir else {
-                throw ToolError.usage("--staging-dir is required when using --package or --local-package.")
+                throw ToolError.usage("--staging-dir is required when using --package, --local-package, or --config.")
             }
 
             let fm = FileManager.default
@@ -149,17 +215,36 @@ struct LumaBundleCompiler {
                 }
             }
 
-            fputs("[packages] installing: \(packageSpecs.joined(separator: ", "))\n", stderr)
+            if hasManifest || !packageSpecs.isEmpty {
+                if hasManifest, let src = manifestPath {
+                    try syncFile(at: src, into: stagingDir)
+                }
+                if let src = lockfilePath, fm.fileExists(atPath: src) {
+                    try syncFile(at: src, into: stagingDir)
+                }
 
-            let pm = PackageManager()
-            let opts = PackageInstallOptions()
-            opts.projectRoot = stagingDir
-            opts.role = .runtime
-            opts.specs = packageSpecs
+                let summary = packageSpecs.isEmpty ? "from manifest" : packageSpecs.joined(separator: ", ")
+                fputs("[packages] installing: \(summary)\n", stderr)
 
-            _ = try await pm.install(options: opts)
+                let pm = PackageManager()
+                let opts = PackageInstallOptions()
+                opts.projectRoot = stagingDir
+                opts.role = .runtime
+                opts.specs = packageSpecs
 
-            fputs("[packages] done\n", stderr)
+                _ = try await pm.install(options: opts)
+
+                fputs("[packages] done\n", stderr)
+
+                let stagingLockfile = URL(fileURLWithPath: stagingDir)
+                    .appendingPathComponent("package-lock.json").path
+                if let dst = lockfilePath, fm.fileExists(atPath: stagingLockfile) {
+                    if fm.fileExists(atPath: dst) {
+                        try fm.removeItem(atPath: dst)
+                    }
+                    try fm.copyItem(atPath: stagingLockfile, toPath: dst)
+                }
+            }
 
             for local in localPackages {
                 let dst = URL(fileURLWithPath: stagingDir)
@@ -241,42 +326,126 @@ struct LumaBundleCompiler {
 
         eventsTask.cancel()
 
-        let swiftFile = makeSwiftFile(from: compiled)
-        let url = URL(fileURLWithPath: swiftOutPath)
+        try writeGeneratedFile(makeAgentFile(from: compiled), to: swiftOutPath)
+
+        if let typingsOutPath, let stagingDir {
+            let compiledTypings = try typingsEntries.map { entry in
+                CompiledTypings(
+                    swiftName: entry.swiftName,
+                    files: try readTypingsFiles(for: entry, stagingDir: stagingDir))
+            }
+            try writeGeneratedFile(makeTypingsFile(from: compiledTypings), to: typingsOutPath)
+        }
+    }
+
+    static func loadConfig(at path: String) throws -> (config: Config, baseDir: String) {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let data = try Data(contentsOf: url)
+        let config = try JSONDecoder().decode(Config.self, from: data)
+        return (config, url.deletingLastPathComponent().path)
+    }
+
+    static func applyConfig(
+        _ loaded: (config: Config, baseDir: String),
+        swiftOutPath: inout String?,
+        typingsOutPath: inout String?,
+        entries: inout [Entry],
+        typingsEntries: inout [TypingsEntry],
+        externals: inout [String]
+    ) {
+        let (config, baseDir) = loaded
+        let resolve: (String) -> String = { resolvePath($0, baseDir: baseDir) }
+
+        if swiftOutPath == nil {
+            swiftOutPath = resolve(config.output.agent)
+        }
+        if typingsOutPath == nil, let out = config.output.typings {
+            typingsOutPath = resolve(out)
+        }
+
+        for bundle in config.input.bundles {
+            entries.append(Entry(kind: bundle.kind, swiftName: bundle.name, entrypoint: bundle.entrypoint))
+        }
+        for typing in config.input.typings {
+            typingsEntries.append(
+                TypingsEntry(swiftName: typing.name, packageName: typing.package))
+        }
+        externals.append(contentsOf: config.input.externals)
+    }
+
+    static func syncFile(at source: String, into directory: String) throws {
+        let fm = FileManager.default
+        let dst = URL(fileURLWithPath: directory)
+            .appendingPathComponent((source as NSString).lastPathComponent).path
+        if fm.fileExists(atPath: dst) {
+            try fm.removeItem(atPath: dst)
+        }
+        try fm.copyItem(atPath: source, toPath: dst)
+    }
+
+    static func resolvePath(_ path: String, baseDir: String) -> String {
+        if (path as NSString).isAbsolutePath { return path }
+        return URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: baseDir, isDirectory: true))
+            .standardizedFileURL.path
+    }
+
+    static func writeGeneratedFile(_ contents: String, to path: String) throws {
+        let url = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true,
             attributes: nil)
-        try swiftFile.write(to: url, atomically: true, encoding: .utf8)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func readTypingsFiles(
+        for entry: TypingsEntry,
+        stagingDir: String
+    ) throws -> [(filePath: String, content: String)] {
+        let fm = FileManager.default
+        let packageRoot = URL(fileURLWithPath: stagingDir)
+            .appendingPathComponent("node_modules", isDirectory: true)
+            .appendingPathComponent(entry.packageName, isDirectory: true)
+            .standardizedFileURL
+
+        let enumerator = fm.enumerator(
+            at: packageRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        var files: [(filePath: String, content: String)] = []
+        while let url = enumerator?.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            guard url.pathExtension == "ts", url.lastPathComponent.hasSuffix(".d.ts") else { continue }
+
+            let relPath = url.path.replacingOccurrences(of: packageRoot.path + "/", with: "")
+            let content = try String(contentsOf: url, encoding: .utf8)
+            files.append((filePath: "\(entry.packageName)/\(relPath)", content: content))
+        }
+        files.sort { $0.filePath < $1.filePath }
+        return files
     }
 
     static func printUsageAndExit(success: Bool) -> Never {
         let prog = (CommandLine.arguments.first as NSString?)?.lastPathComponent ?? "LumaBundleCompiler"
         let text = """
             Usage:
-              \(prog) --swift-out <swift-file> [--project-root <path>] \\
-                      [--staging-dir <path>] [--package <spec>]... \\
-                      [--agent <swiftName> <entry.ts>]... \\
-                      [--module <swiftName> <entry.ts>]...
-
-            Kinds:
-              agent   - keep Frida's compiled bundle container as a Swift string
-              module  - unwrap Frida's 📦 bundle and embed only the module JS
+              \(prog) --config <config.json> --project-root <path> --staging-dir <path>
 
             Options:
-              --staging-dir <path>  Directory for package installation and compilation
-              --package <spec>      Install npm package into staging dir before compilation
-              --external <name>     Do not bundle imports of this npm package
-
-            Examples:
-              \(prog) --project-root /path/to/repo \\
-                      --swift-out Luma/Generated/LumaAgent.swift \\
-                      --staging-dir /path/to/build/.agent-staging \\
-                      --package frida-itrace \\
-                      --agent  core      Luma/Agent/core/luma.ts \\
-                      --agent  drain     Luma/Agent/instruments/drain-agent.ts \\
-                      --module tracer    Luma/Agent/instruments/tracer.ts \\
-                      --module codeShare Luma/Agent/instruments/codeshare.ts
+              --config <path>               JSON config listing packages, typings, agents, modules
+              --project-root <path>         Root that agent entrypoints resolve against
+              --staging-dir <path>          Directory for package installation and compilation
+              --swift-out <path>            Override agent output path from config
+              --typings-out <path>          Override typings output path from config
+              --package <spec>              Install an extra npm package
+              --external <name>             Do not bundle imports of this npm package
+              --typings <swiftName> <spec>  Install an extra typings package and embed its *.d.ts files
+              --local-package <name> <path> Override an installed package with a local checkout
+              --agent <swiftName> <entry>   Add a Frida-bundle agent entry
+              --module <swiftName> <entry>  Add an unwrapped-module entry
 
             """
         fputs(text, success ? stdout : stderr)
@@ -329,13 +498,8 @@ enum ToolError: LocalizedError {
     }
 }
 
-private func makeSwiftFile(from entries: [LumaBundleCompiler.CompiledEntry]) -> String {
-    var out = """
-        // This file is auto-generated by LumaBundleCompiler.
-        // Do not edit by hand. Your changes will be overwritten.
-
-        import Foundation
-
+private func makeAgentFile(from entries: [LumaBundleCompiler.CompiledEntry]) -> String {
+    var out = generatedFileHeader() + """
         enum LumaAgent {
 
         """
@@ -358,6 +522,56 @@ private func makeSwiftFile(from entries: [LumaBundleCompiler.CompiledEntry]) -> 
     out += "}\n"
     return out
 }
+
+private func makeTypingsFile(from entries: [LumaBundleCompiler.CompiledTypings]) -> String {
+    var out = generatedFileHeader() + """
+        enum LumaTypings {
+
+        """
+
+    for (index, entry) in entries.enumerated() {
+        if index > 0 {
+            out += "\n"
+        }
+
+        out += """
+                static let \(entry.swiftName): [TypeScriptTypingFile] = [
+
+            """
+
+        for file in entry.files {
+            let indented = indentMultiline(file.content, by: 12)
+            out += """
+                        TypeScriptTypingFile(
+                            filePath: \"\(file.filePath)\",
+                            content: #\"\"\"
+                \(indented)
+                            \"\"\"#),
+
+                """
+        }
+
+        out += """
+                ]
+
+            """
+    }
+
+    out += "}\n"
+    return out
+}
+
+private func generatedFileHeader() -> String {
+    """
+    // This file is auto-generated by LumaBundleCompiler.
+    // Do not edit by hand. Your changes will be overwritten.
+
+    import Foundation
+
+
+    """
+}
+
 
 private func indentMultiline(_ string: String, by spaces: Int) -> String {
     let prefix = String(repeating: " ", count: spaces)
