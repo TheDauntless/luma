@@ -68,6 +68,7 @@ final class MainWindow: InstrumentUIHost {
     private var sessionNameLabels: [UUID: Label] = [:]
     private var sessionDeviceLabels: [UUID: Label] = [:]
     private var sessionArmIcons: [UUID: Gtk.Image] = [:]
+    private var sessionDetachedHosts: [UUID: Box] = [:]
     private var sessionChevronImages: [UUID: Gtk.Image] = [:]
     private var instrumentChildActions: [String: @MainActor () -> Void] = [:]
     private var instrumentChildKeyByComponent: [InstrumentComponentReference: String] = [:]
@@ -2195,6 +2196,7 @@ final class MainWindow: InstrumentUIHost {
             sessionNameLabels[session.id]?.label = session.processName
             sessionDeviceLabels[session.id]?.label = session.deviceName
             sessionArmIcons[session.id]?.visible = isArmed(session)
+            refreshDetachedIndicator(for: session)
             if currentREPLSessionID == session.id {
                 currentREPLPane?.applySessionState()
             }
@@ -2223,6 +2225,7 @@ final class MainWindow: InstrumentUIHost {
             sessionNameLabels.removeValue(forKey: id)
             sessionDeviceLabels.removeValue(forKey: id)
             sessionArmIcons.removeValue(forKey: id)
+            sessionDetachedHosts.removeValue(forKey: id)
             sessionChevronImages.removeValue(forKey: id)
             switch selection {
             case .session(let sid),
@@ -2298,7 +2301,7 @@ final class MainWindow: InstrumentUIHost {
         let headerRow = ListBoxRow()
         let headerBox = Box(orientation: .horizontal, spacing: MainWindow.sidebarColumnSpacing)
         headerBox.marginStart = MainWindow.sidebarHeaderMarginStart
-        headerBox.marginEnd = 12
+        headerBox.marginEnd = 3
         headerBox.marginTop = 4
         headerBox.marginBottom = 4
 
@@ -2333,9 +2336,16 @@ final class MainWindow: InstrumentUIHost {
         deviceLabel.add(cssClass: "dim-label")
         titles.append(child: deviceLabel)
         headerBox.append(child: titles)
+
+        let detachedHost = Box(orientation: .horizontal, spacing: 0)
+        detachedHost.valign = .center
+        headerBox.append(child: detachedHost)
+
         sessionNameLabels[session.id] = nameLabel
         sessionDeviceLabels[session.id] = deviceLabel
         sessionArmIcons[session.id] = armIcon
+        sessionDetachedHosts[session.id] = detachedHost
+        refreshDetachedIndicator(for: session)
 
         headerRow.set(child: headerBox)
         attachSessionContextMenu(row: headerRow, anchor: headerBox, session: session)
@@ -2784,6 +2794,55 @@ final class MainWindow: InstrumentUIHost {
     private func isArmed(_ session: LumaCore.ProcessSession) -> Bool {
         if case .armed = session.armingState { return true }
         return false
+    }
+
+    private func refreshDetachedIndicator(for session: LumaCore.ProcessSession) {
+        guard let host = sessionDetachedHosts[session.id] else { return }
+        if let rootPtr = host.root?.ptr {
+            Gtk.WindowRef(raw: rootPtr).focus = nil
+        }
+        var child = host.firstChild
+        while let cur = child {
+            child = cur.nextSibling
+            host.remove(child: cur)
+        }
+        guard shouldShowDetachedIndicator(session) else { return }
+        if session.phase == .attaching {
+            let spinner = Adw.Spinner()
+            spinner.tooltipText = "\(session.kind.reestablishLabel)ing\u{2026}"
+            host.append(child: spinner)
+            return
+        }
+        let icon = Gtk.Image(iconName: "view-refresh-symbolic")
+        icon.pixelSize = 14
+        icon.add(cssClass: detachedTintCssClass(for: session))
+        let button = Button()
+        button.set(child: icon)
+        button.add(cssClass: "flat")
+        button.add(cssClass: "luma-sidebar-detached")
+        button.valign = .center
+        button.tooltipText = "\(session.kind.reestablishLabel)\u{2026}"
+        let sessionID = session.id
+        button.onClicked { [weak self] _ in
+            MainActor.assumeIsolated { self?.reestablishSession(id: sessionID) }
+        }
+        host.append(child: button)
+    }
+
+    private func shouldShowDetachedIndicator(_ session: LumaCore.ProcessSession) -> Bool {
+        guard engine?.node(forSessionID: session.id) == nil, !isArmed(session) else { return false }
+        if session.lastAttachedAt != nil { return true }
+        if case .attach = session.kind { return true }
+        return false
+    }
+
+    private func detachedTintCssClass(for session: LumaCore.ProcessSession) -> String {
+        switch session.detachReason {
+        case .applicationRequested:
+            return "warning"
+        default:
+            return "error"
+        }
     }
 
     private func disarm(sessionID: UUID) {

@@ -10,11 +10,18 @@ enum StyleSheet {
 
     .luma-tight-sidebar > row {
         padding-left: 4px;
+        padding-right: 4px;
         margin-left: 0;
         margin-right: 0;
     }
 
     button.luma-sidebar-chevron {
+        padding: 0;
+        min-width: 24px;
+        min-height: 24px;
+    }
+
+    button.luma-sidebar-detached {
         padding: 0;
         min-width: 24px;
         min-height: 24px;
