@@ -40,6 +40,7 @@ struct HookPackConfigView: View {
 
             Spacer()
         }
+        .padding(8)
     }
 
     private func stateBinding(for feature: CustomInstrumentDef.Feature) -> Binding<FeatureState> {

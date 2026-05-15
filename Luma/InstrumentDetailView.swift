@@ -29,23 +29,18 @@ struct InstrumentDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let inst = instance, let ui = InstrumentUIRegistry.shared.ui(for: inst) {
-                    ui.makeConfigEditor(configJSON: configBinding, engine: engine, selection: $selection)
-                        .environment(\.instrumentSession, session)
-                        .environment(\.instrumentInstance, inst)
-                } else {
-                    Text("This instrument doesn't expose any configurable settings yet.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
+            if let inst = instance, let ui = InstrumentUIRegistry.shared.ui(for: inst) {
+                ui.makeConfigEditor(configJSON: configBinding, engine: engine, selection: $selection)
+                    .environment(\.instrumentSession, session)
+                    .environment(\.instrumentInstance, inst)
+            } else {
+                Text("This instrument doesn't expose any configurable settings yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
                 Spacer()
             }
-            .padding(.top, 8)
-            .padding(.leading, 8)
-            .padding(.trailing, 8)
         }
         .frame(minWidth: 360, minHeight: 300)
     }

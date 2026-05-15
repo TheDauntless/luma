@@ -23,6 +23,8 @@ struct CodeShareConfigView: View {
             editor
         }
         .padding(.top, 4)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
         .onAppear {
             draftSource = config.source
         }

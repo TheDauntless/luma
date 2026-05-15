@@ -43,6 +43,7 @@ struct CustomInstrumentConfigView: View {
 
             Spacer()
         }
+        .padding(8)
     }
 
     private var header: some View {

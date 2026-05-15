@@ -75,6 +75,9 @@ struct CustomInstrumentEditorView: View {
                 onSave: saveDraft
             )
         }
+        .padding(.top, 8)
+        .padding(.leading, 8)
+        .padding(.bottom, 8)
         .onAppear {
             isEditorFocused = true
         }

@@ -44,6 +44,9 @@ struct TracerConfigView: View {
 
     var body: some View {
         content
+            .padding(.top, 8)
+            .padding(.leading, 8)
+            .padding(.bottom, 8)
     }
 
     @ViewBuilder
