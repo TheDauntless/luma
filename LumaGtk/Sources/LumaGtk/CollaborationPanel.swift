@@ -38,7 +38,8 @@ final class CollaborationPanel {
     private var suppressScrollPinUpdate = false
     private var signInWindow: Adw.Dialog?
     private var isEditingLabTitle: Bool = false
-    private var chatTimestamps: [(label: Label, date: Date)] = []
+    private var chatRows: [UUID: ListBoxRow] = [:]
+    private var chatTimestamps: [UUID: (label: Label, date: Date)] = [:]
     private var tickerTask: Task<Void, Never>?
 
     private static let headerAvatarSize: Int = 24
@@ -204,7 +205,7 @@ final class CollaborationPanel {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 let now = Date()
-                for entry in self.chatTimestamps {
+                for entry in self.chatTimestamps.values {
                     entry.label.label = RelativeTime.string(from: entry.date, now: now)
                 }
             }
@@ -506,8 +507,8 @@ final class CollaborationPanel {
 
     private func observeChat() {
         guard let engine else { return }
-        engine.collaboration.onChatMessagesDidChange = { [weak self] in
-            self?.refreshChat()
+        engine.collaboration.onChatMessageChange = { [weak self] change in
+            self?.applyChatChange(change)
         }
         engine.collaboration.onChatMessageReceived = { [weak self] message in
             guard let self, !message.isLocal, let engine = self.engine else { return }
@@ -879,23 +880,57 @@ final class CollaborationPanel {
         return engine.collaboration.members.reduce(0) { $0 + ($1.role == .owner ? 1 : 0) }
     }
 
+    private func applyChatChange(_ change: LumaCore.CollaborationSession.ChatMessageChange) {
+        switch change {
+        case .reset:
+            refreshChat()
+        case .appended(let message):
+            appendChatRow(for: message)
+            lastChatCount += 1
+            if isPinnedToBottom { scrollChatToBottomSoon() }
+            refreshChatInputState()
+        case .replaced(let id, let message):
+            replaceChatRow(id: id, with: message)
+        case .removed(let id):
+            removeChatRow(id: id)
+            lastChatCount = max(0, lastChatCount - 1)
+            refreshChatInputState()
+        }
+    }
+
     private func refreshChat() {
         guard let engine else { return }
         chatListBox.removeAll()
+        chatRows.removeAll()
         chatTimestamps.removeAll()
-        let messages = engine.collaboration.chatMessages
-        for message in messages {
-            chatListBox.append(child: buildChatRow(for: message))
+        for message in engine.collaboration.chatMessages {
+            appendChatRow(for: message)
         }
-
-        if messages.count != lastChatCount {
-            lastChatCount = messages.count
-            if isPinnedToBottom {
-                scrollChatToBottomSoon()
-            }
-        }
-
+        lastChatCount = engine.collaboration.chatMessages.count
+        if isPinnedToBottom { scrollChatToBottomSoon() }
         refreshChatInputState()
+    }
+
+    private func appendChatRow(for message: LumaCore.CollaborationSession.ChatMessage) {
+        let row = buildChatRow(for: message)
+        chatRows[message.id] = row
+        chatListBox.append(child: row)
+    }
+
+    private func replaceChatRow(id: UUID, with message: LumaCore.CollaborationSession.ChatMessage) {
+        guard let old = chatRows[id] else { return }
+        let position = Int(old.index)
+        chatListBox.remove(child: old)
+        chatTimestamps.removeValue(forKey: id)
+        let row = buildChatRow(for: message)
+        chatRows[id] = row
+        chatListBox.insert(child: row, position: position)
+    }
+
+    private func removeChatRow(id: UUID) {
+        guard let row = chatRows.removeValue(forKey: id) else { return }
+        chatListBox.remove(child: row)
+        chatTimestamps.removeValue(forKey: id)
     }
 
     private func buildChatRow(for message: LumaCore.CollaborationSession.ChatMessage) -> ListBoxRow {
@@ -934,7 +969,7 @@ final class CollaborationPanel {
         timeLabel.halign = .end
         timeLabel.add(cssClass: "caption")
         timeLabel.add(cssClass: "dim-label")
-        chatTimestamps.append((label: timeLabel, date: message.timestamp))
+        chatTimestamps[message.id] = (label: timeLabel, date: message.timestamp)
         header.append(child: timeLabel)
         bubble.append(child: header)
 

@@ -323,7 +323,14 @@ public final class CollaborationSession {
     public var onWidgetStatesSnapshot: (([WidgetStateSnapshot]) -> Void)?
     public var onSessionOpRejected: ((UUID, String) -> Void)?
     public var onChatMessageReceived: ((ChatMessage) -> Void)?
-    public var onChatMessagesDidChange: (() -> Void)?
+    public var onChatMessageChange: ((ChatMessageChange) -> Void)?
+
+    public enum ChatMessageChange: Sendable {
+        case reset
+        case appended(ChatMessage)
+        case replaced(id: UUID, with: ChatMessage)
+        case removed(id: UUID)
+    }
     public var onAuthRejected: ((AuthFailure) async -> Void)?
 
     private var nextRequestId = 0
@@ -400,7 +407,7 @@ public final class CollaborationSession {
         pendingCreateOrJoinDispatched = false
         members = []
         chatMessages = []
-        onChatMessagesDidChange?()
+        onChatMessageChange?(.reset)
         vapidPublicKey = nil
         registeredPushPlatforms = []
         pendingRequests.removeAll()
@@ -442,7 +449,7 @@ public final class CollaborationSession {
         }
         let optimistic = ChatMessage(text: text, sender: localUser, isLocal: true)
         chatMessages.append(optimistic)
-        onChatMessagesDidChange?()
+        onChatMessageChange?(.appended(optimistic))
         do {
             let confirmed = try await requestAddChat(labID: labID, message: optimistic, localUser: localUser)
             replaceChatMessage(id: optimistic.id, with: confirmed)
@@ -483,13 +490,13 @@ public final class CollaborationSession {
     private func replaceChatMessage(id: UUID, with replacement: ChatMessage) {
         guard let index = chatMessages.firstIndex(where: { $0.id == id }) else { return }
         chatMessages[index] = replacement
-        onChatMessagesDidChange?()
+        onChatMessageChange?(.replaced(id: id, with: replacement))
     }
 
     private func removeChatMessage(id: UUID) {
         guard let index = chatMessages.firstIndex(where: { $0.id == id }) else { return }
         chatMessages.remove(at: index)
-        onChatMessagesDidChange?()
+        onChatMessageChange?(.removed(id: id))
     }
 
     /// True once this project has ever joined or created a lab. Local-only
@@ -1361,7 +1368,7 @@ public final class CollaborationSession {
         setStatus(.joined(labID: labID))
         members = memberDicts.compactMap(Member.fromJSON)
         chatMessages = chatMsgs.compactMap { ChatMessage.fromJSON($0, localUser: localUser) }
-        onChatMessagesDidChange?()
+        onChatMessageChange?(.reset)
 
         var collabState = try! store.fetchCollaborationState()
         collabState.labID = labID
@@ -1679,15 +1686,13 @@ public final class CollaborationSession {
 
         case ("+add", let s) where s.count == 4 && s[0] == "labs" && s[2] == "chat" && s[3] == "messages":
             guard let localUser, let msgs = payload["messages"] as? [JSONObject] else { return }
-            var added = false
             for m in msgs {
                 if let message = ChatMessage.fromJSON(m, localUser: localUser) {
                     chatMessages.append(message)
                     onChatMessageReceived?(message)
-                    added = true
+                    onChatMessageChange?(.appended(message))
                 }
             }
-            if added { onChatMessagesDidChange?() }
 
         default:
             break
