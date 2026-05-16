@@ -160,6 +160,8 @@ struct WelcomeView: View {
             HStack {
                 Text("Continue from a lab")
                     .font(.headline)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Spacer()
                 Button {
                     Task { await welcome.refreshLabs() }
@@ -174,14 +176,19 @@ struct WelcomeView: View {
                     }
                 } label: {
                     if let user = welcome.gitHubAuth.currentUser {
-                        Label(user.name, systemImage: "person.circle")
-                            .labelStyle(.titleAndIcon)
+                        Label {
+                            Text(user.name)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        } icon: {
+                            Image(systemName: "person.circle")
+                        }
+                        .labelStyle(.titleAndIcon)
                     } else {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .fixedSize()
             }
 
             labsContent
