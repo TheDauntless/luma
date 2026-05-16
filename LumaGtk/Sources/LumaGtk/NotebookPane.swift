@@ -13,6 +13,7 @@ final class NotebookPane {
     private let scroll: ScrolledWindow
     private let contentBox: Box
     private let emptyState: Box
+    private let joiningState: Box
     private let entriesBox: Box
     private let newNoteButton: Button
     private let timeFormatter: DateFormatter
@@ -61,7 +62,13 @@ final class NotebookPane {
         emptyState.hexpand = true
         emptyState.vexpand = true
 
+        joiningState = NotebookPane.makeJoiningState()
+        joiningState.hexpand = true
+        joiningState.vexpand = true
+        joiningState.visible = false
+
         contentBox.append(child: emptyState)
+        contentBox.append(child: joiningState)
         contentBox.append(child: scroll)
         scroll.visible = false
 
@@ -95,6 +102,20 @@ final class NotebookPane {
 
         populateEntries()
         startRelativeTimeTicker()
+        observeCollaborationStatus()
+    }
+
+    private func observeCollaborationStatus() {
+        guard let engine else { return }
+        withObservationTracking {
+            _ = engine.collaboration.status
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.updateVisibility()
+                self.observeCollaborationStatus()
+            }
+        }
     }
 
     deinit {
@@ -211,7 +232,12 @@ final class NotebookPane {
     private func updateVisibility() {
         let hasEntries = !entryRows.isEmpty
         let anyEditing = !editingEntries.isEmpty
-        emptyState.visible = !hasEntries
+        let isJoining: Bool = {
+            guard let engine else { return false }
+            return engine.collaboration.status == .connecting && !hasEntries
+        }()
+        joiningState.visible = isJoining
+        emptyState.visible = !hasEntries && !isJoining
         scroll.visible = hasEntries
         newNoteButton.visible = hasEntries && !anyEditing
     }
@@ -659,6 +685,43 @@ final class NotebookPane {
         row.append(child: bodyLabel)
 
         return row
+    }
+
+    private static func makeJoiningState() -> Box {
+        let outer = Box(orientation: .vertical, spacing: 0)
+        outer.hexpand = true
+        outer.vexpand = true
+        outer.halign = .center
+        outer.valign = .center
+
+        let stack = Box(orientation: .vertical, spacing: 16)
+        stack.halign = .center
+        stack.valign = .center
+        stack.marginStart = 24
+        stack.marginEnd = 24
+        stack.marginTop = 24
+        stack.marginBottom = 24
+
+        let spinner = Adw.Spinner()
+        spinner.halign = .center
+        spinner.setSizeRequest(width: 32, height: 32)
+        stack.append(child: spinner)
+
+        let title = Label(str: "Joining lab\u{2026}")
+        title.add(cssClass: "title-3")
+        title.halign = .center
+        stack.append(child: title)
+
+        let subtitle = Label(str: "Syncing this project's shared state.")
+        subtitle.add(cssClass: "dim-label")
+        subtitle.wrap = true
+        subtitle.justify = .center
+        subtitle.halign = .center
+        subtitle.setSizeRequest(width: 360, height: -1)
+        stack.append(child: subtitle)
+
+        outer.append(child: stack)
+        return outer
     }
 
     private static func makeWalkthroughEmptyState(onNewNote: @escaping () -> Void) -> Box {
