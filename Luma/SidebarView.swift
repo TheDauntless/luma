@@ -599,10 +599,7 @@ private struct SidebarInstrumentRow: View {
                 .frame(width: subrowIconWidth, alignment: .center)
             Text(descriptor.displayName)
             if let status = runtimeStatus {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                    .help(status.summary)
+                InstrumentStatusIndicator(status: status)
             }
             Spacer()
         }

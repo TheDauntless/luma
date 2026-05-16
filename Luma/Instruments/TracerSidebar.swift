@@ -80,6 +80,9 @@ private struct TracerSidebarHookRow: View {
             Text(hook.displayName)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if let status = hookStatus {
+                InstrumentStatusIndicator(status: status)
+            }
             Spacer()
         }
         .font(.callout)
@@ -172,6 +175,12 @@ private struct TracerSidebarHookRow: View {
             Text("i")
                 .font(.system(size: 14, weight: .regular, design: .serif).italic())
         }
+    }
+
+    private var hookStatus: InstrumentStatus? {
+        engine.node(forSessionID: sessionID)?
+            .instruments.first(where: { $0.id == instrumentID })?
+            .componentStatuses[hook.id]
     }
 
     private var itraceCaptured: Int {
