@@ -610,6 +610,7 @@ private struct LabPictureView: View {
 
     #if canImport(UIKit)
     @State private var photoSelection: PhotosPickerItem?
+    @State private var isShowingPhotoPicker = false
     #endif
 
     var body: some View {
@@ -626,14 +627,18 @@ private struct LabPictureView: View {
             }
             #elseif canImport(UIKit)
             if collaboration.isOwner {
-                PhotosPicker(
-                    selection: $photoSelection,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
+                Button {
+                    isShowingPhotoPicker = true
+                } label: {
                     pictureView
                 }
                 .buttonStyle(.plain)
+                .photosPicker(
+                    isPresented: $isShowingPhotoPicker,
+                    selection: $photoSelection,
+                    matching: .images,
+                    photoLibrary: .shared()
+                )
                 .onChange(of: photoSelection) { _, newValue in
                     guard let newValue else { return }
                     Task { await loadAndUpload(newValue) }
