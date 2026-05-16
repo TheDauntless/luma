@@ -84,10 +84,16 @@ export interface ConsoleInput {
     text: string;
 }
 
+export interface ConsoleResponder {
+    output(text: string): void;
+    error(text: string): void;
+    value(v: unknown): void;
+}
+
 export interface InstrumentHandle<C = unknown> {
     updateConfig?(config: C): Promise<void> | void;
     onAction?(action: WidgetAction): Promise<void> | void;
-    onConsoleInput?(input: ConsoleInput): Promise<void> | void;
+    onConsoleInput?(input: ConsoleInput, respond: ConsoleResponder): Promise<void> | void;
     dispose?(): Promise<void> | void;
 }
 
@@ -175,7 +181,54 @@ export async function submitConsoleInput({ instanceId, widget, entryId, text }: 
         throw new Error(`No such instance: ${instanceId}`);
     }
 
-    await controller.handle.onConsoleInput?.({ widget, entryId, text });
+    const respond = makeConsoleResponder(instanceId, widget, entryId);
+    try {
+        await controller.handle.onConsoleInput?.({ widget, entryId, text }, respond);
+    } catch (e) {
+        respond.error((e instanceof Error) ? e.message : String(e));
+    }
+    send({
+        type: "widget-console-reply-done",
+        instance_id: instanceId,
+        widget,
+        reply_to: entryId,
+    }, null);
+}
+
+function makeConsoleResponder(
+    instanceId: string,
+    widget: string,
+    replyTo: string
+): ConsoleResponder {
+    const postEntry = (
+        entry: { kind: "output" | "error"; text: string; value?: unknown },
+        data: ArrayBuffer | null
+    ) => {
+        send({
+            type: "widget-console-append",
+            instance_id: instanceId,
+            widget,
+            entry: {
+                id: makeId(),
+                kind: entry.kind,
+                text: entry.text,
+                value: entry.value,
+                reply_to: replyTo,
+            },
+        }, data);
+    };
+    return {
+        output(text) {
+            postEntry({ kind: "output", text }, null);
+        },
+        error(text) {
+            postEntry({ kind: "error", text }, null);
+        },
+        value(v) {
+            const [tree, blob] = encodeValue(v);
+            postEntry({ kind: "output", text: "", value: tree }, blob);
+        },
+    };
 }
 
 async function loadInstrumentModule(
