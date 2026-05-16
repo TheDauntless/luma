@@ -50,6 +50,12 @@ struct CustomInstrumentEditorView: View {
         .onChange(of: requestedPath) { _, newPath in
             handleNavigationRequest(toPath: newPath)
         }
+        .onChange(of: def?.entrypoint) { _, newEntrypoint in
+            guard let newEntrypoint, !isDirty else { return }
+            if displayedFile == nil {
+                applyNavigation(toPath: newEntrypoint)
+            }
+        }
     }
 
     @ViewBuilder

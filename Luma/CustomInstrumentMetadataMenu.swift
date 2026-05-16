@@ -109,6 +109,9 @@ struct CustomInstrumentMetadataMenu: View {
         Task { @MainActor in
             await engine.renameCustomInstrumentFile(defID: id, from: original, to: trimmed)
             await engine.setCustomInstrumentEntrypoint(defID: id, path: trimmed)
+            if selection == .customInstrumentFile(id, original) {
+                selection = .customInstrumentFile(id, trimmed)
+            }
         }
     }
 
