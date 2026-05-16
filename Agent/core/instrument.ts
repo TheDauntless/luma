@@ -71,16 +71,16 @@ export interface ConsoleEntry {
     text: string;
 }
 
-export interface ConsoleInput {
-    widget: string;
-    entryId: string;
-    text: string;
-}
-
 export interface WidgetAction {
     widget: string;
     action: string;
     item?: string;
+}
+
+export interface ConsoleInput {
+    widget: string;
+    entryId: string;
+    text: string;
 }
 
 export interface InstrumentHandle<C = unknown> {
@@ -177,6 +177,31 @@ export async function submitConsoleInput({ instanceId, widget, entryId, text }: 
     await controller.handle.onConsoleInput?.({ widget, entryId, text });
 }
 
+async function loadInstrumentModule(
+    moduleName: string,
+    source: string
+): Promise<Instrument> {
+    const cached = modules.get(moduleName);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const ns = await Script.load(moduleName, source);
+    const instrument = parseInstrumentModule(ns, moduleName);
+
+    modules.set(moduleName, instrument);
+
+    return instrument;
+}
+
+function parseInstrumentModule(ns: unknown, name: string): Instrument {
+    const { instrument } = ns as { instrument?: Instrument };
+    if (typeof instrument?.create !== "function") {
+        throw new Error(`Instrument module ${name} does not export a valid instrument`);
+    }
+    return instrument;
+}
+
 function makeInstrumentContext(instanceId: string): InstrumentContext {
     const post = (type: string, payload: object, data?: ArrayBuffer | number[] | null) => {
         send({
@@ -254,31 +279,6 @@ function makeInstrumentContext(instanceId: string): InstrumentContext {
             };
         },
     };
-}
-
-async function loadInstrumentModule(
-    moduleName: string,
-    source: string
-): Promise<Instrument> {
-    const cached = modules.get(moduleName);
-    if (cached !== undefined) {
-        return cached;
-    }
-
-    const ns = await Script.load(moduleName, source);
-    const instrument = parseInstrumentModule(ns, moduleName);
-
-    modules.set(moduleName, instrument);
-
-    return instrument;
-}
-
-function parseInstrumentModule(ns: unknown, name: string): Instrument {
-    const { instrument } = ns as { instrument?: Instrument };
-    if (typeof instrument?.create !== "function") {
-        throw new Error(`Instrument module ${name} does not export a valid instrument`);
-    }
-    return instrument;
 }
 
 function makeId(): string {
