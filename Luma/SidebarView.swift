@@ -519,17 +519,13 @@ private struct SidebarSessionHeaderRow: View {
 
     @ViewBuilder
     private var hostBadge: some View {
-        if let host = session.host, !engine.isHostingNode(session.id) {
+        if let host = session.host,
+           !engine.isHostingNode(session.id),
+           host.id != engine.collaboration.localUser?.id
+        {
             UserAvatarView(user: host, size: 16)
-                .help(hostBadgeTooltip(host: host))
+                .help("Hosted by @\(host.id) on \(session.deviceName)")
         }
-    }
-
-    private func hostBadgeTooltip(host: LumaCore.CollaborationSession.UserInfo) -> String {
-        if host.id == engine.collaboration.localUser?.id {
-            return "Hosted by you on \(session.deviceName)"
-        }
-        return "Hosted by @\(host.id) on \(session.deviceName)"
     }
 
     private var placeholderSeed: String {

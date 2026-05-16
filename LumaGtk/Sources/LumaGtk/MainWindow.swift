@@ -2861,16 +2861,11 @@ final class MainWindow: InstrumentUIHost {
     private func makeHostBadge(for session: LumaCore.ProcessSession) -> Widget? {
         guard let engine,
               let host = session.host,
-              engine.node(forSessionID: session.id) == nil
+              engine.node(forSessionID: session.id) == nil,
+              host.id != engine.collaboration.localUser?.id
         else { return nil }
         let avatar = makeHostAvatar(host: host, size: 18)
-        let tooltip: String
-        if host.id == engine.collaboration.localUser?.id {
-            tooltip = "Hosted by you on \(session.deviceName)"
-        } else {
-            tooltip = "Hosted by @\(host.id) on \(session.deviceName)"
-        }
-        avatar.tooltipText = tooltip
+        avatar.tooltipText = "Hosted by @\(host.id) on \(session.deviceName)"
         return avatar
     }
 
