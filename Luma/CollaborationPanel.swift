@@ -402,7 +402,7 @@ struct CollaborationPanel: View {
                                             avatarView(for: msg.sender)
                                             Text("@\(msg.sender.id)")
                                                 .font(.caption2)
-                                                .foregroundStyle(.secondary)
+                                                .foregroundColor(.secondary)
                                             Spacer()
                                             RelativeTimeText(
                                                 date: msg.timestamp,
@@ -417,7 +417,7 @@ struct CollaborationPanel: View {
                                     .padding(6)
                                     .background(
                                         msg.isLocal
-                                            ? Color.accentColor.opacity(0.2)
+                                            ? Color.accentColor.opacity(0.35)
                                             : Color.secondary.opacity(0.1)
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
