@@ -8,6 +8,7 @@ import AppKit
 #endif
 #if canImport(UIKit)
 import UIKit
+import PhotosUI
 #endif
 
 struct CollaborationPanel: View {
@@ -606,6 +607,10 @@ private struct LabPictureView: View {
 
     private static let pictureSize: CGFloat = 48
 
+    #if canImport(UIKit)
+    @State private var photoSelection: PhotosPickerItem?
+    #endif
+
     var body: some View {
         Group {
             #if canImport(AppKit)
@@ -615,6 +620,23 @@ private struct LabPictureView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Change lab picture")
+            } else {
+                pictureView
+            }
+            #elseif canImport(UIKit)
+            if collaboration.isOwner {
+                PhotosPicker(
+                    selection: $photoSelection,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    pictureView
+                }
+                .buttonStyle(.plain)
+                .onChange(of: photoSelection) { _, newValue in
+                    guard let newValue else { return }
+                    Task { await loadAndUpload(newValue) }
+                }
             } else {
                 pictureView
             }
@@ -731,6 +753,34 @@ private struct LabPictureView: View {
                   properties: [.compressionFactor: 0.85]
               )
         else { return passthrough }
+        return (jpeg, "image/jpeg")
+    }
+    #endif
+
+    #if canImport(UIKit)
+    private func loadAndUpload(_ item: PhotosPickerItem) async {
+        defer { Task { @MainActor in photoSelection = nil } }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let (bytes, contentType) = normalizedPicture(from: data)
+        await collaboration.setLabPicture(bytes, contentType: contentType)
+    }
+
+    private func normalizedPicture(from data: Data) -> (Data, String) {
+        let maxDimension: CGFloat = 512
+        guard let image = UIImage(data: data) else { return (data, "image/jpeg") }
+        let size = image.size
+        let longest = max(size.width, size.height)
+        if longest <= maxDimension && data.count <= 512 * 1024,
+           let jpeg = image.jpegData(compressionQuality: 0.85) {
+            return (jpeg, "image/jpeg")
+        }
+        let scale = min(1, maxDimension / longest)
+        let target = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: target)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        let jpeg = resized.jpegData(compressionQuality: 0.85) ?? data
         return (jpeg, "image/jpeg")
     }
     #endif
