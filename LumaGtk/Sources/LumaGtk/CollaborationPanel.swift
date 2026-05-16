@@ -488,20 +488,20 @@ final class CollaborationPanel {
         guard let engine else { return }
         engine.collaboration.onMemberAdded = { [weak self] member in
             guard let self else { return }
-            self.addParticipant(member.user)
+            self.applyMemberPatch(userID: member.user.id)
             guard let engine = self.engine,
                   !engine.collaboration.isSelf(member.user.id)
             else { return }
             self.desktopNotifier?.notifyMemberAdded(member, labID: engine.collaboration.labID)
         }
         engine.collaboration.onMemberRemoved = { [weak self] userID in
-            self?.removeParticipant(userID)
+            self?.removeParticipantWidget(userID: userID)
         }
-        engine.collaboration.onMemberRoleChanged = { [weak self] _, _ in
-            self?.refreshParticipants()
+        engine.collaboration.onMemberRoleChanged = { [weak self] userID, _ in
+            self?.applyMemberPatch(userID: userID)
         }
-        engine.collaboration.onMemberPresenceChanged = { [weak self] _, _ in
-            self?.refreshParticipants()
+        engine.collaboration.onMemberPresenceChanged = { [weak self] userID, _ in
+            self?.applyMemberPatch(userID: userID)
         }
     }
 
@@ -757,32 +757,52 @@ final class CollaborationPanel {
     }
 
     private func refreshParticipants() {
-        guard let engine else { return }
         for (_, widget) in participantWidgets {
             participantsStrip.remove(child: widget)
         }
         participantWidgets.removeAll()
-
-        let sorted = engine.collaboration.members.sorted { a, b in
-            if (a.role == .owner) != (b.role == .owner) { return a.role == .owner }
-            if (a.presence == .online) != (b.presence == .online) {
-                return a.presence == .online
-            }
-            return a.joinedAt < b.joinedAt
-        }
-        for member in sorted {
+        for member in sortedMembers() {
             let widget = makeMemberAvatar(for: member, size: Self.participantAvatarSize)
             participantsStrip.append(child: widget)
             participantWidgets[member.user.id] = widget
         }
     }
 
-    private func addParticipant(_ user: LumaCore.CollaborationSession.UserInfo) {
-        refreshParticipants()
+    private func applyMemberPatch(userID: String) {
+        guard let engine,
+            let member = engine.collaboration.members.first(where: { $0.user.id == userID })
+        else {
+            removeParticipantWidget(userID: userID)
+            return
+        }
+        if let existing = participantWidgets.removeValue(forKey: userID) {
+            participantsStrip.remove(child: existing)
+        }
+        let widget = makeMemberAvatar(for: member, size: Self.participantAvatarSize)
+        participantWidgets[userID] = widget
+        let sorted = sortedMembers()
+        guard let position = sorted.firstIndex(where: { $0.user.id == userID }) else {
+            participantsStrip.append(child: widget)
+            return
+        }
+        let predecessor = position > 0 ? participantWidgets[sorted[position - 1].user.id] : nil
+        participantsStrip.insertChildAfter(child: widget, sibling: predecessor)
     }
 
-    private func removeParticipant(_ userID: String) {
-        refreshParticipants()
+    private func removeParticipantWidget(userID: String) {
+        guard let widget = participantWidgets.removeValue(forKey: userID) else { return }
+        participantsStrip.remove(child: widget)
+    }
+
+    private func sortedMembers() -> [LumaCore.CollaborationSession.Member] {
+        guard let engine else { return [] }
+        return engine.collaboration.members.sorted { a, b in
+            if (a.role == .owner) != (b.role == .owner) { return a.role == .owner }
+            if (a.presence == .online) != (b.presence == .online) {
+                return a.presence == .online
+            }
+            return a.joinedAt < b.joinedAt
+        }
     }
 
     private func makeMemberAvatar(
