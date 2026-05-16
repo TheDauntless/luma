@@ -142,6 +142,17 @@ private struct PhoneContentView: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar { drawerTriggers }
                         }
+
+                    case .customInstrument(let defID, let filePath):
+                        CustomInstrumentEditorView(
+                            defID: defID,
+                            path: filePath,
+                            engine: engine,
+                            selection: $path.asSidebarSelection()
+                        )
+                        .navigationTitle(engine.customInstruments.def(withId: defID)?.name ?? "Custom Instrument")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { drawerTriggers }
                     }
                 }
             }
@@ -200,6 +211,7 @@ enum PhoneRoute: Hashable {
     case instrument(UUID, UUID)
     case insight(UUID, UUID)
     case trace(UUID, UUID)
+    case customInstrument(UUID, String?)
 }
 
 extension Binding where Value == [PhoneRoute] {
@@ -216,7 +228,11 @@ extension Binding where Value == [PhoneRoute] {
                     self.wrappedValue.append(.instrument(sid, iid))
                 case .itrace(let sid, let tid):
                     self.wrappedValue.append(.trace(sid, tid))
-                case .session, .repl, .notebook, .missions, .mission, .package, .customInstrumentDef, .customInstrumentFile:
+                case .customInstrumentDef(let defID):
+                    self.wrappedValue.append(.customInstrument(defID, nil))
+                case .customInstrumentFile(let defID, let path):
+                    self.wrappedValue.append(.customInstrument(defID, path))
+                case .session, .repl, .notebook, .missions, .mission, .package:
                     break
                 }
             }

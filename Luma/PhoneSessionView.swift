@@ -91,7 +91,7 @@ struct PhoneSessionView: View {
                 AddInstrumentSheet(
                     session: session,
                     engine: engine,
-                    selection: .constant(nil),
+                    selection: $path.asSidebarSelection(),
                     onInstrumentAdded: { _ in
                         isShowingAddInstrument = false
                     },
