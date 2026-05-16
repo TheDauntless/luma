@@ -17,6 +17,7 @@ struct PhoneSessionsListView: View {
     @State private var pendingKillSession: LumaCore.ProcessSession?
     @State private var pendingDeleteSession: LumaCore.ProcessSession?
     @State private var isShowingNotebook = false
+    @State private var isShowingMissions = false
     @State private var isShowingHostingBlockedAlert = false
 
     private var sessions: [LumaCore.ProcessSession] { engine.sessions }
@@ -59,6 +60,15 @@ struct PhoneSessionsListView: View {
             }
             .accessibilityLabel("Notebook")
 
+            Button {
+                isShowingMissions = true
+            } label: {
+                Image(systemName: "scope")
+                    .font(.title3)
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("Missions")
+
             Spacer()
 
             Button {
@@ -100,6 +110,9 @@ struct PhoneSessionsListView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $isShowingNotebook) {
             PhoneNotebookSheet(engine: engine)
+        }
+        .sheet(isPresented: $isShowingMissions) {
+            PhoneMissionsSheet(engine: engine)
         }
         .sheet(
                 item: Binding(

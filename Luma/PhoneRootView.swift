@@ -186,6 +186,42 @@ struct PhoneNotebookSheet: View {
     }
 }
 
+struct PhoneMissionsSheet: View {
+    let engine: Engine
+    @Environment(\.dismiss) private var dismiss
+    @State private var path: [UUID] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            MissionsListView(
+                engine: engine,
+                selection: Binding(
+                    get: { nil },
+                    set: { newValue in
+                        if case .mission(let id) = newValue {
+                            path.append(id)
+                        }
+                    }
+                )
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .navigationDestination(for: UUID.self) { missionID in
+                MissionView(
+                    engine: engine,
+                    missionID: missionID,
+                    selection: .constant(.mission(missionID))
+                )
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+}
+
 struct PhoneDocumentActions {
     let currentDisplayName: String
     let new: () -> Void
