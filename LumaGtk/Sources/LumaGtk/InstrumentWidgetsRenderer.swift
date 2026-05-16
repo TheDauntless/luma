@@ -167,6 +167,7 @@ private final class WidgetCanvas {
             let view = ConsoleWidget(
                 config: cfg,
                 initialEntries: snapshot.consoleEntries,
+                widgetName: definition.name,
                 engine: engine,
                 sessionID: sessionID,
                 onSubmit: onConsoleSubmit
@@ -215,18 +216,21 @@ private final class ConsoleWidget {
     let widget: Box
     private weak var engine: Engine?
     private let sessionID: UUID
+    private let widgetName: String
     private let console: ConsoleView
     private var valueWidgetKeepers: [JSInspectValueWidget] = []
 
     init(
         config: InstrumentWidget.ConsoleConfig,
         initialEntries: [WidgetConsoleEntry],
+        widgetName: String,
         engine: Engine,
         sessionID: UUID,
         onSubmit: @escaping (_ text: String) -> Void
     ) {
         self.engine = engine
         self.sessionID = sessionID
+        self.widgetName = widgetName
         let style = ConsoleView.Style(
             promptGlyph: config.prompt ?? "\u{203A}",
             placeholder: config.placeholder ?? "",
@@ -278,7 +282,54 @@ private final class ConsoleWidget {
         glyphLabel.valign = .start
         row.append(child: glyphLabel)
         row.append(child: makeBody(for: entry, cssClass: bodyCssClass))
+        attachContextMenu(to: row, entry: entry)
         return row
+    }
+
+    private func attachContextMenu(to anchor: Box, entry: WidgetConsoleEntry) {
+        let gesture = GestureClick()
+        gesture.set(button: 3)
+        gesture.onPressed { [weak self, anchor] _, _, x, y in
+            MainActor.assumeIsolated {
+                self?.presentRowContextMenu(at: anchor, x: x, y: y, entry: entry)
+            }
+        }
+        anchor.install(controller: gesture)
+    }
+
+    private func presentRowContextMenu(at anchor: Widget, x: Double, y: Double, entry: WidgetConsoleEntry) {
+        ContextMenu.present([
+            [
+                .init("Add to Notebook") { [weak self] in
+                    self?.addEntryToNotebook(entry)
+                },
+            ],
+        ], at: anchor, x: x, y: y)
+    }
+
+    private func addEntryToNotebook(_ entry: WidgetConsoleEntry) {
+        guard let engine else { return }
+        let processName = engine.sessions.first { $0.id == sessionID }?.processName ?? ""
+        var notebookEntry = LumaCore.NotebookEntry(
+            title: notebookTitle(for: entry),
+            details: entry.value == nil ? entry.text : "",
+            binaryData: nil,
+            sessionID: sessionID,
+            processName: processName
+        )
+        if let value = entry.value {
+            notebookEntry.jsValue = value
+        }
+        engine.addNotebookEntry(notebookEntry)
+    }
+
+    private func notebookTitle(for entry: WidgetConsoleEntry) -> String {
+        switch entry.kind {
+        case .input:
+            return entry.text
+        case .output, .error:
+            return widgetName
+        }
     }
 
     private func makeBody(for entry: WidgetConsoleEntry, cssClass: String?) -> Widget {

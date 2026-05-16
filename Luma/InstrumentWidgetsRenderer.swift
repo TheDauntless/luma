@@ -84,6 +84,7 @@ private struct WidgetCanvas: View {
         ConsoleWidgetView(
             entries: state.consoleEntries,
             config: cfg,
+            widgetName: widget.name,
             sessionID: instance?.sessionID ?? UUID(),
             engine: engine,
             selection: selection,
@@ -300,6 +301,7 @@ private struct WidgetCanvas: View {
 private struct ConsoleWidgetView: View {
     let entries: [WidgetConsoleEntry]
     let config: InstrumentWidget.ConsoleConfig
+    let widgetName: String
     let sessionID: UUID
     let engine: Engine
     let selection: Binding<SidebarItemID?>
@@ -367,6 +369,13 @@ private struct ConsoleWidgetView: View {
             entryBody(entry)
         }
         .font(.system(.caption, design: .monospaced))
+        .contextMenu {
+            Button {
+                addToNotebook(entry)
+            } label: {
+                Label("Add to Notebook", systemImage: "book.pages")
+            }
+        }
     }
 
     @ViewBuilder
@@ -408,5 +417,28 @@ private struct ConsoleWidgetView: View {
         guard !text.isEmpty else { return }
         draft = ""
         onSubmit(text)
+    }
+
+    private func addToNotebook(_ entry: WidgetConsoleEntry) {
+        var notebookEntry = LumaCore.NotebookEntry(
+            title: notebookTitle(for: entry),
+            details: entry.value == nil ? entry.text : "",
+            binaryData: nil,
+            sessionID: sessionID,
+            processName: engine.sessions.first(where: { $0.id == sessionID })?.processName
+        )
+        if let value = entry.value {
+            notebookEntry.jsValue = value
+        }
+        engine.addNotebookEntry(notebookEntry)
+    }
+
+    private func notebookTitle(for entry: WidgetConsoleEntry) -> String {
+        switch entry.kind {
+        case .input:
+            return entry.text
+        case .output, .error:
+            return widgetName
+        }
     }
 }
