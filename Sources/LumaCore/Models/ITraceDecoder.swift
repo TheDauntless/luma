@@ -213,7 +213,7 @@ public enum ITraceDecoder {
         _ rawData: Data,
         hookTarget: String?,
         prologueBytes: String?
-    ) -> (traceData: Data, metadataJSON: Data) {
+    ) -> (traceData: Data, metadataJSON: Data, panics: [String]) {
         let bytes = [UInt8](rawData)
         var offset = 0
 
@@ -221,6 +221,7 @@ public enum ITraceDecoder {
         var blocks: [[String: Any]] = []
         var traceRecords = Data()
         var blockRecordSizes: [UInt64: Int] = [:]
+        var panics: [String] = []
 
         while offset + 8 <= bytes.count {
             let sentinel = readUInt64(bytes, at: offset)
@@ -257,7 +258,7 @@ public enum ITraceDecoder {
 
                 case 4:
                     let msg = String(bytes: bytes[payloadStart..<(payloadStart + payloadSize)], encoding: .utf8) ?? "unknown"
-                    print("[itrace] panic: \(msg)")
+                    panics.append(msg)
 
                 default:
                     break
@@ -278,7 +279,7 @@ public enum ITraceDecoder {
 
         let metadataJSON = (try? JSONSerialization.data(withJSONObject: metadata)) ?? Data()
 
-        return (traceData: traceRecords, metadataJSON: metadataJSON)
+        return (traceData: traceRecords, metadataJSON: metadataJSON, panics: panics)
     }
 
     private static func parseCompileEvent(_ bytes: [UInt8], at start: Int, size: Int) -> [String: Any] {

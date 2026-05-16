@@ -221,6 +221,10 @@ public final class Engine {
                 self.onMissionsChanged?(missions)
             }
         }
+        hookPacks.onError = { [weak self] message in
+            self?.emitEngineError(subsystem: "hookpacks", text: message)
+        }
+        hookPacks.reload()
     }
 
     private func syncAPNsSubscription() {
@@ -647,6 +651,21 @@ public final class Engine {
         !collaboration.isCollaborative || collaboration.isOwner
     }
 
+    private func emitEngineError(subsystem: String, text: String) {
+        emitEngineEvent(subsystem: subsystem, level: .error, text: text)
+    }
+
+    private func emitEngineWarning(subsystem: String, text: String) {
+        emitEngineEvent(subsystem: subsystem, level: .warning, text: text)
+    }
+
+    private func emitEngineEvent(subsystem: String, level: ConsoleLevel, text: String) {
+        _events.yield(RuntimeEvent(
+            source: .engine(subsystem: subsystem),
+            payload: .consoleMessage(ConsoleMessage(level: level, values: [.string(text)]))
+        ))
+    }
+
     private func broadcastInstrumentStatus(instanceID: UUID, sessionID: UUID) {
         guard let instance = try? store.fetchInstrument(id: instanceID) else { return }
         onSessionListChanged?(.instrumentUpdated(instance))
@@ -1042,7 +1061,7 @@ public final class Engine {
                     keepaliveInterval: config.keepaliveInterval
                 )
             } catch {
-                print("[Engine] failed to add remote device \(config.address): \(String(describing: error)))")
+                emitEngineError(subsystem: "devices", text: "Failed to add remote device \(config.address): \(userFacingMessage(error))")
             }
         }
     }
@@ -1075,7 +1094,7 @@ public final class Engine {
             editorFSSnapshot = snapshot.withVersion(editorFSSnapshotVersion)
             editorFSSnapshotDirty = false
         } catch {
-            print("Failed to rebuild editor FS snapshot: \(error)")
+            emitEngineError(subsystem: "editor", text: "Failed to rebuild editor FS snapshot: \(userFacingMessage(error))")
         }
     }
 
@@ -1158,7 +1177,7 @@ public final class Engine {
                 node.loadedPackageNames.insert(entry["name"] as! String)
             }
         } catch {
-            print("[Engine] failed to load packages: \(String(describing: error)))")
+            emitEngineError(subsystem: "packages", text: "Failed to load packages: \(userFacingMessage(error))")
         }
     }
 
@@ -1176,11 +1195,11 @@ public final class Engine {
             try await node.loadPackages([entry])
             node.loadedPackageNames.insert(entry["name"] as! String)
         } catch {
-            print("[Engine] failed to load package \(package.name): \(String(describing: error))")
+            var message = "Failed to load package \(package.name): \(userFacingMessage(error))"
             if let compile = error as? CompileFailure, !compile.diagnostics.isEmpty {
-                let formatted = compile.diagnostics.map(\.description).joined(separator: "\n")
-                print("[Engine] compiler diagnostics:\n\(formatted)")
+                message += "\n\n" + compile.diagnostics.map(\.description).joined(separator: "\n")
             }
+            emitEngineError(subsystem: "packages", text: message)
         }
     }
 
@@ -1464,7 +1483,7 @@ public final class Engine {
                 collaboration.enqueueUpdateSessionPhase(sessionID: sid, phase: .attached)
             }
         } catch {
-            print("[Engine] attach failed: \(String(describing: error)))")
+            emitEngineError(subsystem: "attach", text: "Failed to attach to \(s.processName): \(userFacingMessage(error))")
             updateSession(id: s.id) {
                 $0.lastError = error.localizedDescription
                 $0.phase = .idle
@@ -1662,7 +1681,7 @@ public final class Engine {
                        message: reason)
                 recordGatingErrorOnArmedSessions(forDeviceID: deviceID, reason: reason)
             } else {
-                print("[Engine] failed to disable spawn gating on \(deviceID): \(reason)")
+                emitEngineWarning(subsystem: "spawn-gating", text: "Failed to disable spawn gating on \(deviceID): \(reason)")
             }
         }
     }
@@ -3294,7 +3313,7 @@ public final class Engine {
         do {
             try await node.invokeWidgetAction(instanceID: instance.id, widget: widget, action: action, item: item)
         } catch {
-            print("[Engine] Failed to invoke widget action: \(error)")
+            emitEngineError(subsystem: "instruments", text: "Failed to invoke widget action \(widget).\(action): \(userFacingMessage(error))")
         }
     }
 
@@ -3354,7 +3373,10 @@ public final class Engine {
                     do {
                         try await node.disposeInstrumentOnAgent(instanceID: liveInstance.id)
                     } catch {
-                        print("[Engine] Failed to dispose custom instance \(liveInstance.id): \(error)")
+                        emitEngineError(
+                            subsystem: "instruments",
+                            text: "Failed to dispose custom instance \(liveInstance.id): \(userFacingMessage(error))"
+                        )
                     }
                     node.markInstrumentDetached(id: liveInstance.id)
                 }
@@ -3591,7 +3613,7 @@ public final class Engine {
                     switch event.source {
                     case .instrument, .console, .script:
                         self?.collaboration.sendEvent(sessionID: sid, event: event)
-                    case .repl, .processOutput, .spawnGating:
+                    case .repl, .processOutput, .spawnGating, .engine:
                         break
                     }
                 }

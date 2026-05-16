@@ -6,11 +6,12 @@ import Observation
 public final class HookPackLibrary {
     public private(set) var packs: [HookPack] = []
 
+    @ObservationIgnored public var onError: ((String) -> Void)?
+
     private let directory: URL
 
     public init(directory: URL) {
         self.directory = directory
-        reload()
     }
 
     public func reload() {
@@ -73,7 +74,7 @@ public final class HookPackLibrary {
                 let id = url.lastPathComponent
                 result.append(HookPack(id: id, manifest: manifest, folderURL: url))
             } catch {
-                print("Failed to decode hook-pack manifest at \(manifestURL): \(error)")
+                onError?("Failed to decode hook-pack manifest at \(manifestURL.path): \(error)")
             }
         }
 

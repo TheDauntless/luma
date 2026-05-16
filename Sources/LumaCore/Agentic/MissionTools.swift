@@ -3205,6 +3205,7 @@ public enum MissionTools {
         case .repl: return "repl"
         case .instrument(_, let name): return "instrument:\(name)"
         case .spawnGating: return "spawn_gating"
+        case .engine(let subsystem): return "engine:\(subsystem)"
         }
     }
 

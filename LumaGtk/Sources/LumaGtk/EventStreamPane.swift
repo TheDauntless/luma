@@ -734,6 +734,8 @@ final class EventStreamPane {
         case .spawnGating(_, let deviceName, _, _, let outcome):
             let label = outcome == .captured ? "Spawn Captured" : "Spawn Released"
             return "\(deviceName) • \(label)"
+        case .engine(let subsystem):
+            return "Engine • \(subsystem)"
         }
     }
 
@@ -755,6 +757,8 @@ final class EventStreamPane {
             return "Instrument"
         case .spawnGating(_, _, _, _, let outcome):
             return outcome == .captured ? "spawn-captured" : "spawn-released"
+        case .engine:
+            return "engine"
         }
     }
 
@@ -1013,6 +1017,8 @@ final class EventStreamPane {
             title = engine.instrument(forEvent: event).map { engine.descriptor(for: $0).displayName } ?? name
         case .spawnGating(_, _, _, _, let outcome):
             title = outcome == .captured ? "Spawn Captured" : "Spawn Released"
+        case .engine(let subsystem):
+            title = "Engine (\(subsystem))"
         }
 
         var jsValue: JSInspectValue? = nil
@@ -1217,6 +1223,8 @@ final class EventStreamPane {
         case .spawnGating(_, let deviceName, _, _, let outcome):
             let label = outcome == .captured ? "captured" : "released"
             return "spawn \(label) · \(deviceName)"
+        case .engine(let subsystem):
+            return "engine · \(subsystem)"
         }
     }
 
@@ -1265,6 +1273,7 @@ private enum EventSourceFilter: String, CaseIterable, Hashable {
     case repl
     case instrument
     case spawnGating
+    case engine
 
     var menuTitle: String {
         switch self {
@@ -1274,6 +1283,7 @@ private enum EventSourceFilter: String, CaseIterable, Hashable {
         case .repl: return "REPL"
         case .instrument: return "Instruments"
         case .spawnGating: return "Spawn Gating"
+        case .engine: return "Engine"
         }
     }
 
@@ -1285,6 +1295,7 @@ private enum EventSourceFilter: String, CaseIterable, Hashable {
         case .repl: return .repl
         case .instrument: return .instrument
         case .spawnGating: return .spawnGating
+        case .engine: return .engine
         }
     }
 }

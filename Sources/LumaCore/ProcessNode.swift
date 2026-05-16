@@ -810,7 +810,7 @@ public final class ProcessNode: Identifiable {
                 return anyArray.compactMap { $0 as? String }
             }
         } catch {
-            print("REPL completion RPC failed: \(error)")
+            yieldEngineEvent(subsystem: "repl", level: .warning, text: "Failed to fetch REPL completions: \(error)")
         }
 
         return []
@@ -1221,7 +1221,7 @@ public final class ProcessNode: Identifiable {
 
     private func makeRunningTrace(sessionId: String) -> ITrace? {
         guard let pending = pendingTraces[sessionId] else { return nil }
-        let (traceData, metadataJSON) = decodeAccumulated(pending: pending)
+        let (traceData, metadataJSON, _) = decodeAccumulated(pending: pending)
         return ITrace(
             id: pending.id,
             sessionID: sessionID,
@@ -1237,13 +1237,12 @@ public final class ProcessNode: Identifiable {
 
     public func livePendingTraceData(traceID: UUID) -> Data? {
         for pending in pendingTraces.values where pending.id == traceID {
-            let (traceData, _) = decodeAccumulated(pending: pending)
-            return traceData
+            return decodeAccumulated(pending: pending).traceData
         }
         return nil
     }
 
-    private func decodeAccumulated(pending: PendingTrace) -> (traceData: Data, metadataJSON: Data) {
+    private func decodeAccumulated(pending: PendingTrace) -> (traceData: Data, metadataJSON: Data, panics: [String]) {
         return ITraceDecoder.parseRawBuffer(
             pending.accumulated,
             hookTarget: pending.hookTarget,
@@ -1293,7 +1292,10 @@ public final class ProcessNode: Identifiable {
         guard let pending = pendingTraces.removeValue(forKey: sessionId) else { return }
         if systemDrainOwner == sessionId { systemDrainOwner = nil }
 
-        var (traceData, metadataJSON) = decodeAccumulated(pending: pending)
+        var (traceData, metadataJSON, panics) = decodeAccumulated(pending: pending)
+        for panic in panics {
+            yieldEngineEvent(subsystem: "itrace", level: .error, text: "Panic: \(panic)")
+        }
         if case .functionCall = pending.origin {
             ITraceDecoder.cleanupAfterCapture(traceData: &traceData, metadataJSON: &metadataJSON)
         }
@@ -1405,6 +1407,13 @@ public final class ProcessNode: Identifiable {
             try? await systemSession.detach()
             self.systemSession = nil
         }
+    }
+
+    private func yieldEngineEvent(subsystem: String, level: ConsoleLevel, text: String) {
+        _events.yield(RuntimeEvent(
+            source: .engine(subsystem: subsystem),
+            payload: .consoleMessage(ConsoleMessage(level: level, values: [.string(text)]))
+        ))
     }
 }
 

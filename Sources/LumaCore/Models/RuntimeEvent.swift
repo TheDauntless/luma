@@ -15,6 +15,7 @@ public struct RuntimeEvent: Identifiable, Sendable {
         case repl
         case instrument(id: UUID, name: String)
         case spawnGating(deviceID: String, deviceName: String, identifier: String?, pid: UInt, outcome: SpawnGatingOutcome)
+        case engine(subsystem: String)
     }
 
     public enum SpawnGatingOutcome: String, Sendable {
@@ -151,6 +152,8 @@ public struct RuntimeEvent: Identifiable, Sendable {
             ]
             if let identifier { dict["identifier"] = identifier }
             return dict
+        case .engine(let subsystem):
+            return ["kind": "engine", "subsystem": subsystem]
         }
     }
 
@@ -187,6 +190,9 @@ public struct RuntimeEvent: Identifiable, Sendable {
                 pid: pid,
                 outcome: outcome
             )
+        case "engine":
+            guard let subsystem = obj["subsystem"] as? String else { return nil }
+            return .engine(subsystem: subsystem)
         default:
             return nil
         }

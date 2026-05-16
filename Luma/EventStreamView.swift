@@ -506,6 +506,9 @@ struct EventStreamView: View {
             case .released: title = "Spawn Released"
             }
             return (deviceName, title)
+
+        case .engine(let subsystem):
+            return (nil, "Engine (\(subsystem))")
         }
     }
 
@@ -566,6 +569,7 @@ private enum EventSourceFilter: String, CaseIterable, Identifiable {
     case repl
     case instrument
     case spawnGating
+    case engine
 
     var id: String { rawValue }
 
@@ -578,6 +582,7 @@ private enum EventSourceFilter: String, CaseIterable, Identifiable {
         case .repl: return "REPL"
         case .instrument: return "Instruments"
         case .spawnGating: return "Spawn Gating"
+        case .engine: return "Engine"
         }
     }
 
@@ -602,6 +607,9 @@ private enum EventSourceFilter: String, CaseIterable, Identifiable {
             return false
         case .spawnGating:
             if case .spawnGating = source { return true }
+            return false
+        case .engine:
+            if case .engine = source { return true }
             return false
         }
     }
@@ -900,6 +908,9 @@ private struct EventSourceBadge: View {
         case .spawnGating(_, let deviceName, _, _, let outcome):
             let label = outcome == .captured ? "Spawn Captured" : "Spawn Released"
             return "\(deviceName) • \(label)"
+
+        case .engine(let subsystem):
+            return "Engine • \(subsystem)"
         }
     }
 
@@ -921,6 +932,8 @@ private struct EventSourceBadge: View {
             return .green
         case .spawnGating(_, _, _, _, let outcome):
             return outcome == .captured ? .blue : .gray
+        case .engine:
+            return .red
         }
     }
 }
