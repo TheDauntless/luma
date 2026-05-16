@@ -3284,6 +3284,11 @@ public final class Engine {
     private func applyWidgetStateSnapshots(_ snapshots: [WidgetStateSnapshot]) {
         for snapshot in snapshots {
             widgetStates[snapshot.instanceID, default: [:]][snapshot.widget] = snapshot.state
+            _widgetUpdates.yield(WidgetUpdate(
+                instanceID: snapshot.instanceID,
+                widget: snapshot.widget,
+                kind: .snapshot(snapshot.state)
+            ))
         }
     }
 
