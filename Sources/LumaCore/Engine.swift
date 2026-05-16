@@ -2929,6 +2929,14 @@ public final class Engine {
         let states = (try? store.fetchWidgetStates(instanceID: instanceID)) ?? [:]
         let persistentIDs = Set(persistentWidgets.map(\.id))
         widgetStates[instanceID] = states.filter { persistentIDs.contains($0.key) }
+        for widget in persistentWidgets {
+            let state = states[widget.id] ?? WidgetState()
+            _widgetUpdates.yield(WidgetUpdate(
+                instanceID: instanceID,
+                widget: widget.id,
+                kind: .snapshot(state)
+            ))
+        }
 
         var restored: [String: Any] = [:]
         for widget in persistentWidgets {

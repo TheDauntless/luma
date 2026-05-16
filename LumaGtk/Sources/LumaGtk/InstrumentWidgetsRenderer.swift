@@ -207,6 +207,14 @@ private final class WidgetCanvas {
             tableView?.clear()
             hexView?.clear()
             consoleWidget?.clear()
+        case .snapshot(let snapshot):
+            counterView?.replace(value: snapshot.counter)
+            histogramView?.replace(buckets: snapshot.histogram)
+            graphView?.replace(series: snapshot.graphSeries)
+            listView?.replace(items: snapshot.listItems)
+            tableView?.replace(rows: snapshot.tableRows)
+            hexView?.replace(state: snapshot.hex)
+            consoleWidget?.replace(entries: snapshot.consoleEntries)
         }
     }
 }
@@ -259,6 +267,17 @@ private final class ConsoleWidget {
         console.clearEntries()
         console.setHistory([])
         valueWidgetKeepers.removeAll()
+    }
+
+    func replace(entries: [WidgetConsoleEntry]) {
+        console.clearEntries()
+        valueWidgetKeepers.removeAll()
+        var history: [String] = []
+        for entry in entries {
+            console.appendEntry(makeRow(for: entry))
+            if entry.kind == .input { history.append(entry.text) }
+        }
+        console.setHistory(history)
     }
 
     private func makeRow(for entry: WidgetConsoleEntry) -> Widget {
@@ -392,6 +411,11 @@ private final class GraphView {
 
     func clear() {
         points.removeAll()
+        drawingArea.queueDraw()
+    }
+
+    func replace(series: [String: [WidgetGraphPoint]]) {
+        points = series
         drawingArea.queueDraw()
     }
 
@@ -542,6 +566,13 @@ private final class ListView {
         refreshVisibility()
     }
 
+    func replace(items: [WidgetListItem]) {
+        clear()
+        for item in items {
+            upsert(item: item)
+        }
+    }
+
     private func refreshVisibility() {
         let isEmpty = orderedItemIDs.isEmpty
         listBox.visible = !isEmpty
@@ -674,6 +705,13 @@ private final class TableView {
         refreshVisibility()
     }
 
+    func replace(rows: [WidgetTableRow]) {
+        clear()
+        for row in rows {
+            upsert(row: row)
+        }
+    }
+
     private func refreshVisibility() {
         let isEmpty = orderedIDs.isEmpty
         body.visible = !isEmpty
@@ -773,6 +811,14 @@ private final class CounterView {
         showEmptyState()
     }
 
+    func replace(value: WidgetCounterValue?) {
+        if let value {
+            set(value: value)
+        } else {
+            showEmptyState()
+        }
+    }
+
     private func showEmptyState() {
         valueRow.visible = false
         emptyLabel.visible = true
@@ -832,6 +878,11 @@ private final class HistogramView {
         drawingArea.queueDraw()
     }
 
+    func replace(buckets: [WidgetHistogramBucket]) {
+        self.buckets = buckets
+        drawingArea.queueDraw()
+    }
+
     private func draw(ctx: Cairo.ContextRef, width: Double, height: Double) {
         guard !buckets.isEmpty, let maxCount = buckets.map(\.count).max(), maxCount > 0 else { return }
         let inset: Double = 12
@@ -883,6 +934,14 @@ private final class HexValueView {
 
     func clear() {
         textView.buffer.text = ""
+    }
+
+    func replace(state: WidgetHexState?) {
+        if let state {
+            set(state: state)
+        } else {
+            clear()
+        }
     }
 
     private func format(state: WidgetHexState) -> String {

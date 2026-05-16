@@ -25,6 +25,10 @@ public struct WidgetUpdate: Sendable, Identifiable {
         case hexSet(WidgetHexState)
         case consoleAppend(WidgetConsoleEntry)
         case clear
+        /// In-memory snapshot replay. Emitted locally when widget state is
+        /// hydrated from disk so listening views can refresh in one shot.
+        /// Never serialized over the wire.
+        case snapshot(WidgetState)
     }
 
     public func toWireJSON() -> [String: Any] {
@@ -75,6 +79,8 @@ public struct WidgetUpdate: Sendable, Identifiable {
             obj["entry"] = entry.toWireJSON()
         case .clear:
             obj["kind"] = "clear"
+        case .snapshot:
+            preconditionFailure("WidgetUpdate.snapshot is in-memory only")
         }
         return obj
     }
@@ -422,7 +428,26 @@ public struct WidgetState: Codable, Sendable, Equatable {
         self.consoleEntries = consoleEntries
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case counter, histogram, graphSeries, listItems, tableRows, hex, consoleEntries
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        counter = try c.decodeIfPresent(WidgetCounterValue.self, forKey: .counter)
+        histogram = try c.decodeIfPresent([WidgetHistogramBucket].self, forKey: .histogram) ?? []
+        graphSeries = try c.decodeIfPresent([String: [WidgetGraphPoint]].self, forKey: .graphSeries) ?? [:]
+        listItems = try c.decodeIfPresent([WidgetListItem].self, forKey: .listItems) ?? []
+        tableRows = try c.decodeIfPresent([WidgetTableRow].self, forKey: .tableRows) ?? []
+        hex = try c.decodeIfPresent(WidgetHexState.self, forKey: .hex)
+        consoleEntries = try c.decodeIfPresent([WidgetConsoleEntry].self, forKey: .consoleEntries) ?? []
+    }
+
     public mutating func apply(_ kind: WidgetUpdate.Kind) {
+        if case .snapshot(let snapshot) = kind {
+            self = snapshot
+            return
+        }
         switch kind {
         case .counterSet(let value):
             counter = value
@@ -464,6 +489,8 @@ public struct WidgetState: Codable, Sendable, Equatable {
             tableRows.removeAll()
             hex = nil
             consoleEntries.removeAll()
+        case .snapshot:
+            break
         }
     }
 
