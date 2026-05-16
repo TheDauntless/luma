@@ -336,6 +336,7 @@ final class LumaApplication {
 
     private var lastBuiltRecentsSignature: String = ""
     private var primaryMenuBuilt: Bool = false
+    private var recentMenuPtr: UnsafeMutableRawPointer?
 
     func rebuildPrimaryMenu() {
         guard let menu = primaryMenuPtr else { return }
@@ -344,25 +345,25 @@ final class LumaApplication {
             return
         }
         lastBuiltRecentsSignature = signature
-        primaryMenuBuilt = true
-        luma_menu_remove_all(menu)
 
-        let topSection = luma_menu_new()
-        appendItem(toMenu: topSection!, label: "New Window", action: "app.new-window")
-        appendItem(toMenu: topSection!, label: "Open\u{2026}", action: "app.open")
-
-        let recents = LumaAppState.shared.recentPaths.prefix(maxRecentSlots)
-        if !recents.isEmpty {
-            let recentMenu = luma_menu_new()!
-            for (i, path) in recents.enumerated() {
-                let label = (path as NSString).lastPathComponent
-                appendItem(toMenu: recentMenu, label: label, action: "app.open-recent-\(i)")
-            }
-            "Open Recent".withCString { label in
-                luma_menu_append_submenu(topSection, label, recentMenu)
-            }
-            luma_menu_unref(recentMenu)
+        if !primaryMenuBuilt {
+            buildPrimaryMenuStructure(menu: menu)
+            primaryMenuBuilt = true
         }
+
+        rebuildRecentMenu()
+    }
+
+    private func buildPrimaryMenuStructure(menu: UnsafeMutableRawPointer) {
+        let topSection = luma_menu_new()!
+        appendItem(toMenu: topSection, label: "New Window", action: "app.new-window")
+        appendItem(toMenu: topSection, label: "Open\u{2026}", action: "app.open")
+
+        let recentMenu = luma_menu_new()!
+        "Open Recent".withCString { label in
+            luma_menu_append_submenu(topSection, label, recentMenu)
+        }
+        recentMenuPtr = recentMenu
 
         luma_menu_append_section(menu, topSection)
         luma_menu_unref(topSection)
@@ -377,6 +378,16 @@ final class LumaApplication {
         appendItem(toMenu: helpSection, label: "About Luma", action: "app.about")
         luma_menu_append_section(menu, helpSection)
         luma_menu_unref(helpSection)
+    }
+
+    private func rebuildRecentMenu() {
+        guard let recentMenu = recentMenuPtr else { return }
+        luma_menu_remove_all(recentMenu)
+        let recents = LumaAppState.shared.recentPaths.prefix(maxRecentSlots)
+        for (i, path) in recents.enumerated() {
+            let label = (path as NSString).lastPathComponent
+            appendItem(toMenu: recentMenu, label: label, action: "app.open-recent-\(i)")
+        }
     }
 
     private func presentShortcutsDialog() {
