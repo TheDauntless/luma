@@ -16,6 +16,7 @@ struct InstrumentWidgetsRenderer: View {
                     GroupBox {
                         WidgetCanvas(widget: widget, instance: instance, engine: engine)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .disabled(instance == nil)
                     } label: {
                         widgetHeader(widget: widget)
                     }
