@@ -74,6 +74,7 @@ public enum MissionTools {
         registerDetachSession(in: catalog, engine: engine)
         registerReadWidgetState(in: catalog, engine: engine)
         registerInvokeWidgetAction(in: catalog, engine: engine)
+        registerSubmitConsoleInput(in: catalog, engine: engine)
         registerRequestUserInput(in: catalog)
     }
 
@@ -3092,6 +3093,56 @@ public enum MissionTools {
             if let item { payload["item"] = item }
             return makeResult(jsonObject: payload, summary: "Invoked \(action) on \(widget)")
         }
+    }
+
+    private static func registerSubmitConsoleInput(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "submit_console_input",
+            description: "Send a line of input to a console widget and wait for the instrument's responses (entries posted with `respond.output` / `respond.error` / `respond.value` from `onConsoleInput`). Returns whatever responses arrived within `timeout_ms` (default 2000). Free-form output the instrument emits via appendOutput / appendError / appendValue is NOT included — only entries explicitly tied back to this input.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"instance_id":{"type":"string"},"widget":{"type":"string"},"text":{"type":"string"},"timeout_ms":{"type":"integer","minimum":1,"maximum":60000,"default":2000}},"required":["session_id","instance_id","widget","text"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id", code: .invalidInput)
+            }
+            guard let instanceIDStr = invocation.args["instance_id"] as? String,
+                let instanceID = UUID(uuidString: instanceIDStr)
+            else {
+                return errorResult("missing or invalid instance_id", code: .invalidInput)
+            }
+            guard let widget = invocation.args["widget"] as? String, !widget.isEmpty else {
+                return errorResult("missing widget", code: .invalidInput)
+            }
+            guard let text = invocation.args["text"] as? String else {
+                return errorResult("missing text", code: .invalidInput)
+            }
+            guard let instance = engine.instrumentsBySession[sessionID]?.first(where: { $0.id == instanceID }) else {
+                return errorResult("no instrument \(instanceID) on session \(sessionID)", code: .notFound)
+            }
+            let timeoutMs = (invocation.args["timeout_ms"] as? Int) ?? 2000
+            let response = await engine.submitConsoleInputAndAwait(
+                instance: instance,
+                widget: widget,
+                text: text,
+                timeout: .milliseconds(timeoutMs)
+            )
+            let replies = response.replies.map(consoleEntryJSON)
+            let payload: [String: Any] = [
+                "instance_id": instanceID.uuidString,
+                "widget": widget,
+                "input_entry_id": response.inputEntryID,
+                "replies": replies,
+            ]
+            return makeResult(jsonObject: payload, summary: "Submitted to \(widget), \(replies.count) repl\(replies.count == 1 ? "y" : "ies")")
+        }
+    }
+
+    private static func consoleEntryJSON(_ entry: WidgetConsoleEntry) -> [String: Any] {
+        entry.toWireJSON()
     }
 
     private static func registerDetachSession(in catalog: ToolCatalog, engine: Engine) {
