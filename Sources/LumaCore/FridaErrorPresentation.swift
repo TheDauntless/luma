@@ -22,6 +22,12 @@ extension InstrumentStatus {
     }
 
     private static func describe(_ error: Swift.Error) -> (message: String, stack: String?) {
+        if let compile = error as? CompileFailure {
+            let inner = describe(compile.underlying)
+            var parts = compile.diagnostics.map(\.description)
+            if let stack = inner.stack { parts.append(stack) }
+            return (inner.message, parts.isEmpty ? nil : parts.joined(separator: "\n"))
+        }
         if let rpc = error as? Frida.Error,
             case let .rpcError(message: message, stackTrace: stackTrace) = rpc
         {

@@ -29,7 +29,7 @@ public final class CompilerWorkspace {
     public var workspaceRoot: URL?
     public var packageBundles: [String: String] = [:]
     public var packageBundlesDirty = true
-    public var lastCompilerDiagnostics: [String] = []
+    public var lastCompilerDiagnostics: [CompilerDiagnostic] = []
 
     private let store: ProjectStore
 
@@ -258,36 +258,41 @@ public final class CompilerWorkspace {
 
     public func withCompilerDiagnostics<T>(
         label: String,
+        pathDisplay: (@Sendable (String) -> String)? = nil,
         _ work: (Compiler) async throws -> T
     ) async throws -> T {
         let compiler = Compiler()
+        let collector = DiagnosticCollector(pathDisplay: pathDisplay)
 
-        var diagnostics: [String] = []
-
+        let stream = compiler.events
         let eventsTask = Task { @MainActor in
-            for await event in compiler.events {
+            for await event in stream {
                 switch event {
-                case .starting:
-                    break
                 case .diagnostics(let payload):
-                    diagnostics.append(String(describing: payload))
-                case .output:
-                    break
+                    collector.absorb(payload)
                 case .finished:
                     return
+                case .starting, .output:
+                    break
                 }
             }
         }
 
+        let outcome: Result<T, Swift.Error>
         do {
-            let result = try await work(compiler)
-            lastCompilerDiagnostics = diagnostics
-            eventsTask.cancel()
-            return result
+            outcome = .success(try await work(compiler))
         } catch {
-            eventsTask.cancel()
-            lastCompilerDiagnostics = diagnostics
-            throw error
+            outcome = .failure(error)
+        }
+
+        await eventsTask.value
+        lastCompilerDiagnostics = collector.diagnostics
+
+        switch outcome {
+        case .success(let value):
+            return value
+        case .failure(let error):
+            throw CompileFailure(label: label, underlying: error, diagnostics: collector.diagnostics)
         }
     }
 
@@ -321,5 +326,75 @@ public final class CompilerWorkspace {
         try? fm.removeItem(at: paths.nodeModules)
         try? fm.removeItem(at: paths.packageJSON)
         try? fm.removeItem(at: paths.packageLockJSON)
+    }
+}
+
+@MainActor
+private final class DiagnosticCollector {
+    private(set) var diagnostics: [CompilerDiagnostic] = []
+    private let pathDisplay: ((String) -> String)?
+
+    init(pathDisplay: ((String) -> String)?) {
+        self.pathDisplay = pathDisplay
+    }
+
+    func absorb(_ payload: Any) {
+        diagnostics.append(contentsOf: CompilerDiagnostic.parse(payload, pathDisplay: pathDisplay))
+    }
+}
+
+public struct CompileFailure: Swift.Error, CustomStringConvertible {
+    public let label: String
+    public let underlying: any Swift.Error
+    public let diagnostics: [CompilerDiagnostic]
+
+    public var description: String {
+        if let frida = underlying as? Frida.Error { return frida.description }
+        return underlying.localizedDescription
+    }
+}
+
+public struct CompilerDiagnostic: Sendable, Hashable, CustomStringConvertible {
+    public struct Location: Sendable, Hashable {
+        public let path: String
+        public let line: Int
+        public let character: Int
+    }
+
+    public let category: String
+    public let code: Int
+    public let location: Location?
+    public let text: String
+
+    public var description: String {
+        var prefix = ""
+        if let location {
+            prefix = "\(location.path):\(location.line):\(location.character) - "
+        }
+        let header = code == -1 ? category : "\(category) TS\(code)"
+        return "\(prefix)\(header): \(text)"
+    }
+
+    static func parse(_ payload: Any, pathDisplay: ((String) -> String)?) -> [CompilerDiagnostic] {
+        let entries = payload as! [[String: Any]]
+        return entries.map { decode($0, pathDisplay: pathDisplay) }
+    }
+
+    private static func decode(_ obj: [String: Any], pathDisplay: ((String) -> String)?) -> CompilerDiagnostic {
+        return CompilerDiagnostic(
+            category: obj["category"] as! String,
+            code: Int(obj["code"] as! Int64),
+            location: (obj["file"] as? [String: Any]).map { decodeLocation($0, pathDisplay: pathDisplay) },
+            text: obj["text"] as! String
+        )
+    }
+
+    private static func decodeLocation(_ obj: [String: Any], pathDisplay: ((String) -> String)?) -> Location {
+        let rawPath = obj["path"] as! String
+        return Location(
+            path: pathDisplay?(rawPath) ?? rawPath,
+            line: Int(obj["line"] as! Int64),
+            character: Int(obj["character"] as! Int64)
+        )
     }
 }

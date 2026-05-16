@@ -1176,10 +1176,10 @@ public final class Engine {
             try await node.loadPackages([entry])
             node.loadedPackageNames.insert(entry["name"] as! String)
         } catch {
-            let diagnostics = compilerWorkspace.lastCompilerDiagnostics.joined(separator: "\n")
             print("[Engine] failed to load package \(package.name): \(String(describing: error))")
-            if !diagnostics.isEmpty {
-                print("[Engine] compiler diagnostics:\n\(diagnostics)")
+            if let compile = error as? CompileFailure, !compile.diagnostics.isEmpty {
+                let formatted = compile.diagnostics.map(\.description).joined(separator: "\n")
+                print("[Engine] compiler diagnostics:\n\(formatted)")
             }
         }
     }
@@ -1699,6 +1699,9 @@ public final class Engine {
     }
 
     private func userFacingMessage(_ error: any Swift.Error) -> String {
+        if let compile = error as? CompileFailure {
+            return userFacingMessage(compile.underlying)
+        }
         if let fridaError = error as? Frida.Error {
             return fridaError.description
         }
@@ -2666,6 +2669,7 @@ public final class Engine {
                     group.addTask {
                         let js = try await self.compileTracerHook(
                             id: hook.id,
+                            displayName: hook.displayName,
                             tsSource: hook.code,
                             paths: paths
                         )
@@ -2706,6 +2710,7 @@ public final class Engine {
 
     private func compileTracerHook(
         id: UUID,
+        displayName: String,
         tsSource: String,
         paths: CompilerWorkspacePaths
     ) async throws -> String {
@@ -2738,7 +2743,18 @@ public final class Engine {
         options.sourceMaps = .omitted
         options.compression = .terser
 
-        let bundle = try await compilerWorkspace.withCompilerDiagnostics(label: "tracer hook \(id.uuidString)") { compiler in
+        let hookID = id.uuidString
+        let userPath = "TracerHooks/\(hookID).ts"
+        let entryPath = "TracerHooks/\(hookID).entry.ts"
+        let bundle = try await compilerWorkspace.withCompilerDiagnostics(
+            label: "tracer hook \(hookID)",
+            pathDisplay: { path in
+                if path.hasSuffix(userPath) || path.hasSuffix(entryPath) {
+                    return displayName
+                }
+                return path
+            }
+        ) { compiler in
             try await compiler.build(entrypoint: entryRelPath, options: options)
         }
 
@@ -2940,7 +2956,14 @@ public final class Engine {
         options.sourceMaps = .omitted
         options.compression = .terser
 
-        let bundle = try await compilerWorkspace.withCompilerDiagnostics(label: diagnosticLabel) { compiler in
+        let sourcePrefix = "\(dirRelPath)/"
+        let bundle = try await compilerWorkspace.withCompilerDiagnostics(
+            label: diagnosticLabel,
+            pathDisplay: { path in
+                guard let range = path.range(of: sourcePrefix) else { return path }
+                return String(path[range.upperBound...])
+            }
+        ) { compiler in
             try await compiler.build(entrypoint: entryRelPath, options: options)
         }
 
