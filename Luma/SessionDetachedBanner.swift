@@ -217,6 +217,9 @@ struct SessionDetachedBanner: View {
 
                     Text(session.processName)
                         .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if session.phase == .attaching || errorText != nil || detachReasonText != nil {
                         Divider()
@@ -231,17 +234,23 @@ struct SessionDetachedBanner: View {
                             Text(session.kind.inProgressLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                         }
                     } else if let errorText = errorText {
                         let errorPrefix = "Last \(session.kind.verbDisplayName) attempt failed: "
                         Text(errorPrefix + errorText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .accessibilityIdentifier("session.errorText")
                     } else if let reasonText = detachReasonText {
                         Text(reasonText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
 
