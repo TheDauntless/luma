@@ -1333,11 +1333,12 @@ public final class ProjectStore: Sendable {
             t.column("session_id", .text).notNull()
                 .references("process_session", onDelete: .cascade)
             t.column("created_at", .datetime).notNull()
-            t.column("title", .text).notNull()
+            t.column("user_title", .text)
             t.column("kind", .integer).notNull()
             t.column("anchor", .blob).notNull()
             t.column("byte_count", .integer).notNull()
             t.column("last_resolved_address", .integer)
+            t.column("parent_insight_id", .text)
         }
 
         try db.create(table: "address_note", ifNotExists: true) { t in

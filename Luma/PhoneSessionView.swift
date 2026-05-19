@@ -344,7 +344,7 @@ struct PhoneSessionView: View {
                     Button {
                         path.append(.insight(sessionID, insight.id))
                     } label: {
-                        InsightRow(insight: insight)
+                        InsightRow(insight: insight, engine: engine)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
@@ -491,6 +491,7 @@ private struct InstrumentRow: View {
 
 private struct InsightRow: View {
     let insight: LumaCore.AddressInsight
+    let engine: Engine
 
     var body: some View {
         HStack(spacing: 12) {
@@ -498,7 +499,7 @@ private struct InsightRow: View {
                 .frame(width: 28, height: 28)
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(insight.title).font(.body)
+                Text(engine.displayTitle(for: insight)).font(.body)
                 Text(insight.anchor.displayString)
                     .font(.caption)
                     .foregroundStyle(.secondary)

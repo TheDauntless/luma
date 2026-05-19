@@ -80,6 +80,7 @@ final class MainWindow: InstrumentUIHost {
     private var instrumentRowIconHosts: [UUID: Box] = [:]
     private var instrumentRowWarningHosts: [UUID: Box] = [:]
     private var traceRowIcons: [UUID: Gtk.Image] = [:]
+    private var insightRowLabels: [UUID: Label] = [:]
     private var selection: SidebarSelection = .notebook
     private var addInstrumentButton: Button!
     private var resumeProcessButton: Button!
@@ -2295,9 +2296,11 @@ final class MainWindow: InstrumentUIHost {
             if let idx = insightsBySession[insight.sessionID]?.firstIndex(where: { $0.id == insight.id }) {
                 insightsBySession[insight.sessionID]?[idx] = insight
             }
+            insightRowLabels[insight.id]?.set(name: engine?.displayTitle(for: insight) ?? insight.anchor.displayString)
             currentInsightDetail?.handleInsightUpdated(insight)
         case .insightRemoved(let id, let sessionID):
             insightsBySession[sessionID]?.removeAll { $0.id == id }
+            insightRowLabels.removeValue(forKey: id)
             removeChildRow(kind: .insight(sessionID: sessionID, insightID: id))
             if case .insight(_, let iid) = selection, iid == id {
                 select(.session(sessionID))
@@ -2674,9 +2677,10 @@ final class MainWindow: InstrumentUIHost {
         iconImage.pixelSize = 16
         MainWindow.centerInIconHost(iconImage)
         iconHost.append(child: iconImage)
-        let lbl = Label(str: insight.title)
+        let lbl = Label(str: engine?.displayTitle(for: insight) ?? insight.anchor.displayString)
         lbl.halign = .start
         rowBox.append(child: lbl)
+        insightRowLabels[insight.id] = lbl
         row.set(child: rowBox)
         attachInsightContextMenu(row: row, anchor: rowBox, insight: insight)
         return row
@@ -3027,8 +3031,33 @@ final class MainWindow: InstrumentUIHost {
         insight: LumaCore.AddressInsight
     ) {
         ContextMenu.present([
+            [.init("Rename…") { [weak self] in self?.presentRenameInsight(insight) }],
             [.init("Delete Insight", destructive: true) { [weak self] in self?.confirmDeleteInsight(insight) }],
         ], at: anchor, x: x, y: y)
+    }
+
+    private func presentRenameInsight(_ insight: LumaCore.AddressInsight) {
+        guard let engine else { return }
+        let entry = Entry()
+        entry.text = engine.displayTitle(for: insight)
+        entry.hexpand = true
+        entry.activatesDefault = true
+        let dialog = Adw.AlertDialog(heading: "Rename Insight", body: insight.anchor.displayString)
+        dialog.addResponse(id: "cancel", label: "_Cancel")
+        dialog.addResponse(id: "rename", label: "_Rename")
+        dialog.setResponseAppearance(response: "rename", appearance: .suggested)
+        dialog.setDefault(response: "rename")
+        dialog.setClose(response: "cancel")
+        dialog.setExtra(child: entry)
+        dialog.onResponse { [weak engine] _, responseID in
+            MainActor.assumeIsolated {
+                guard responseID == "rename" else { return }
+                let trimmed = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, trimmed != engine?.displayTitle(for: insight) else { return }
+                engine?.renameInsight(insight, to: trimmed)
+            }
+        }
+        dialog.present(parent: window)
     }
 
     private func attachTraceContextMenu(
@@ -3102,7 +3131,7 @@ final class MainWindow: InstrumentUIHost {
 
     private func confirmDeleteInsight(_ insight: LumaCore.AddressInsight) {
         confirmDestructive(
-            message: "Delete insight \(insight.title)?",
+            message: "Delete insight \(engine?.displayTitle(for: insight) ?? insight.anchor.displayString)?",
             detail: nil,
             destructiveLabel: "Delete"
         ) { [weak self] in

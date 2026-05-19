@@ -924,6 +924,7 @@ public final class Engine {
         stored.sessionID = sessionID
         try? store.save(stored)
         onSessionListChanged?(.insightUpdated(stored))
+        applyInsightNameToR2(stored)
     }
 
     private func applyRemoteSessionInsightRemoved(sessionID: UUID, insightID: UUID) {
@@ -2156,10 +2157,45 @@ public final class Engine {
             reader: reader
         )
         d.onAnalysisSaved = { [weak self] analysis in
-            self?.collaboration.enqueueUpdateModuleAnalysis(sessionID: sessionID, analysis: analysis)
+            guard let self else { return }
+            self.collaboration.enqueueUpdateModuleAnalysis(sessionID: sessionID, analysis: analysis)
+            Task { @MainActor [weak self] in
+                await self?.linkInsightsForFreshAnalysis(sessionID: sessionID, analysis: analysis)
+            }
+        }
+        d.insightDisplayTitle = { [weak self] insight in
+            self?.displayTitle(for: insight) ?? insight.anchor.displayString
         }
         disassemblers[sessionID] = d
         return d
+    }
+
+    private func linkInsightsForFreshAnalysis(sessionID: UUID, analysis: ModuleAnalysis) async {
+        guard let module = modulesSnapshot(forSessionID: sessionID).first(where: { $0.path == analysis.modulePath }) else { return }
+        let functionStarts = Set(analysis.functions.map { module.base &+ $0.offset })
+        let insights = (try? store.fetchInsights(sessionID: sessionID)) ?? []
+        let newlyDiscoveredStarts = insights.filter { insight in
+            guard let addr = insight.lastResolvedAddress, functionStarts.contains(addr) else { return false }
+            return !insights.contains { other in other.parentInsightID == insight.id }
+        }
+        for parent in newlyDiscoveredStarts {
+            guard let begin = parent.lastResolvedAddress,
+                let end = await disassemblers[sessionID]?.findFunctionEnd(containing: begin),
+                end > begin
+            else { continue }
+            var changed: [AddressInsight] = []
+            for sibling in insights where sibling.id != parent.id && sibling.parentInsightID == nil {
+                guard let addr = sibling.lastResolvedAddress, addr > begin, addr < end else { continue }
+                var updated = sibling
+                updated.parentInsightID = parent.id
+                try? store.save(updated)
+                changed.append(updated)
+            }
+            for c in changed {
+                collaboration.enqueueUpdateInsight(sessionID: sessionID, insight: c)
+                onSessionListChanged?(.insightUpdated(c))
+            }
+        }
     }
 
     public func memoryReader(forSessionID sessionID: UUID) -> MemoryReader {
@@ -2188,6 +2224,49 @@ public final class Engine {
         updated.lastResolvedAddress = resolved
         try? store.save(updated)
         collaboration.enqueueUpdateInsight(sessionID: updated.sessionID, insight: updated)
+    }
+
+    public func renameInsight(_ insight: AddressInsight, to newTitle: String) {
+        var updated = insight
+        updated.userTitle = newTitle
+        try? store.save(updated)
+        collaboration.enqueueUpdateInsight(sessionID: updated.sessionID, insight: updated)
+        applyInsightNameToR2(updated)
+        onSessionListChanged?(.insightUpdated(updated))
+    }
+
+    public func displayTitle(for insight: AddressInsight) -> String {
+        if let title = insight.userTitle, !title.isEmpty { return title }
+        if let parentID = insight.parentInsightID,
+            let parent = (insightsBySession[insight.sessionID] ?? []).first(where: { $0.id == parentID }),
+            let parentAddr = parent.lastResolvedAddress,
+            let myAddr = insight.lastResolvedAddress
+        {
+            return "\(displayTitle(for: parent))+0x\(String(myAddr &- parentAddr, radix: 16))"
+        }
+        if case .moduleOffset(_, let offset) = insight.anchor, isFunctionStart(insight) {
+            return "sub_\(String(offset, radix: 16))"
+        }
+        return insight.anchor.displayString
+    }
+
+    private func isFunctionStart(_ insight: AddressInsight) -> Bool {
+        guard let address = insight.lastResolvedAddress else { return false }
+        let modules = modulesSnapshot(forSessionID: insight.sessionID)
+        guard let module = modules.first(where: { address >= $0.base && address < ($0.base &+ $0.size) }) else { return false }
+        let offset = address &- module.base
+        guard let analysis = try? store.fetchModuleAnalysis(sessionID: insight.sessionID, modulePath: module.path) else { return false }
+        return analysis.functions.contains(where: { $0.offset == offset })
+    }
+
+    private func applyInsightNameToR2(_ insight: AddressInsight) {
+        guard let address = insight.lastResolvedAddress,
+            let disassembler = disassemblers[insight.sessionID]
+        else { return }
+        let title = displayTitle(for: insight)
+        Task { @MainActor in
+            await disassembler.applyInsightName(at: address, title: title)
+        }
     }
 
     public func invalidateInsightRange(sessionID: UUID, address: UInt64, byteCount: Int) async {
@@ -4078,18 +4157,50 @@ public final class Engine {
             return match
         }
 
-        let insight = AddressInsight(
+        var insight = AddressInsight(
             sessionID: sessionID,
-            title: anchor.displayString,
             kind: kind,
             anchor: anchor
         )
+        insight.lastResolvedAddress = pointer
         try store.save(insight)
         onSessionListChanged?(.insightAdded(insight))
         if let node = node(forSessionID: sessionID), let sid = collabSessionID(forNode: node) {
             collaboration.enqueueAddInsight(sessionID: sid, insight: insight)
         }
+        Task { @MainActor [weak self] in
+            await self?.resolveInsightHierarchy(insightID: insight.id, sessionID: sessionID, address: pointer)
+        }
         return insight
+    }
+
+    private func resolveInsightHierarchy(insightID: UUID, sessionID: UUID, address: UInt64) async {
+        guard let dis = disassembler(forSessionID: sessionID),
+            let begin = await dis.findFunctionStart(containing: address)
+        else { return }
+        let siblings = (try? store.fetchInsights(sessionID: sessionID)) ?? []
+        guard let self = (try? store.fetchInsights(sessionID: sessionID))?.first(where: { $0.id == insightID }) else { return }
+
+        if begin != address {
+            if let parent = siblings.first(where: { $0.lastResolvedAddress == begin }), self.parentInsightID != parent.id {
+                var updated = self
+                updated.parentInsightID = parent.id
+                try? store.save(updated)
+                collaboration.enqueueUpdateInsight(sessionID: sessionID, insight: updated)
+                onSessionListChanged?(.insightUpdated(updated))
+            }
+            return
+        }
+
+        guard let end = await dis.findFunctionEnd(containing: address), end > begin else { return }
+        for sibling in siblings where sibling.id != insightID && sibling.parentInsightID == nil {
+            guard let addr = sibling.lastResolvedAddress, addr > begin, addr < end else { continue }
+            var updated = sibling
+            updated.parentInsightID = insightID
+            try? store.save(updated)
+            collaboration.enqueueUpdateInsight(sessionID: sessionID, insight: updated)
+            onSessionListChanged?(.insightUpdated(updated))
+        }
     }
 
     // MARK: - Tracer Event Parsing

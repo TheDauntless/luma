@@ -142,6 +142,27 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         return await fetchFunctionBegin(hex: String(address, radix: 16))
     }
 
+    public func findFunctionEnd(containing address: UInt64) async -> UInt64? {
+        await ensureOpened()
+        if let module = moduleContaining(address: address) {
+            await ensureModuleAnalyzed(module: module)
+        }
+        return await fetchFunctionEnd(hex: String(address, radix: 16))
+    }
+
+    public func applyInsightName(at address: UInt64, title: String) async {
+        await ensureOpened()
+        if let module = moduleContaining(address: address) {
+            await ensureModuleAnalyzed(module: module)
+        }
+        let hex = String(address, radix: 16)
+        let flag = "insight." + r2FlagSafe(title)
+        _ = await r2.cmd("f \(flag) @ 0x\(hex)")
+        if await fetchFunctionBegin(hex: hex) == address {
+            _ = await r2.cmd("afn \(r2FlagSafe(title)) @ 0x\(hex)")
+        }
+    }
+
     private func moduleContaining(address: UInt64) -> ProcessModule? {
         modulesProvider().first { address >= $0.base && address < ($0.base &+ $0.size) }
     }
@@ -187,6 +208,21 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         )
         try? store.save(analysis)
         onAnalysisSaved?(analysis)
+
+        await applyUserInsightNames(inModule: module)
+    }
+
+    public var insightDisplayTitle: ((AddressInsight) -> String)?
+
+    private func applyUserInsightNames(inModule module: ProcessModule) async {
+        guard let title = insightDisplayTitle else { return }
+        let lo = module.base
+        let hi = module.base &+ module.size
+        let insights = (try? store.fetchInsights(sessionID: sessionID)) ?? []
+        for insight in insights where insight.parentInsightID == nil {
+            guard let address = insight.lastResolvedAddress, address >= lo, address < hi else { continue }
+            await applyInsightName(at: address, title: title(insight))
+        }
     }
 
     private func canReuse(_ analysis: ModuleAnalysis, currentIdentity: String?) -> Bool {
@@ -320,10 +356,23 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
             await r2.openFile(uri: uri)
             await r2.cmd("=!")
             await r2.binLoad(uri: uri)
+
+            await self.applyUserInsightNames()
         }
 
         openTask = task
         await task.value
+    }
+
+    private func applyUserInsightNames() async {
+        guard let title = insightDisplayTitle else { return }
+        let insights = (try? store.fetchInsights(sessionID: sessionID)) ?? []
+        for insight in insights where insight.parentInsightID == nil {
+            guard let address = insight.lastResolvedAddress else { continue }
+            let hex = String(address, radix: 16)
+            let flag = "insight." + r2FlagSafe(title(insight))
+            _ = await r2.cmd("f \(flag) @ 0x\(hex)")
+        }
     }
 
     public static func r2Arch(fromFridaArch arch: String) -> String {

@@ -109,7 +109,7 @@ private struct PhoneContentView: View {
 
                     case .insight(let sessionID, let insightID):
                         if let session = engine.sessions.first(where: { $0.id == sessionID }),
-                           (engine.insightsBySession[sessionID] ?? []).contains(where: { $0.id == insightID })
+                           let insight = (engine.insightsBySession[sessionID] ?? []).first(where: { $0.id == insightID })
                         {
                             SessionContent(sessionID: sessionID, engine: engine) {
                                 AddressInsightDetailView(
@@ -119,7 +119,7 @@ private struct PhoneContentView: View {
                                     selection: $path.asSidebarSelection()
                                 )
                             }
-                            .navigationTitle(insight.title)
+                            .navigationTitle(engine.displayTitle(for: insight))
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar { drawerTriggers }
                         }

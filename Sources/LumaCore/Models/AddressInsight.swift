@@ -7,38 +7,42 @@ public struct AddressInsight: Codable, Identifiable, Sendable, FetchableRecord, 
     public var id: UUID
     public var sessionID: UUID
     public var createdAt: Date
-    public var title: String
+    public var userTitle: String?
     public var kind: Kind
     public var anchor: AddressAnchor
     public var byteCount: Int
     public var lastResolvedAddress: UInt64?
+    public var parentInsightID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case id
         case sessionID = "session_id"
         case createdAt = "created_at"
-        case title
+        case userTitle = "user_title"
         case kind
         case anchor
         case byteCount = "byte_count"
         case lastResolvedAddress = "last_resolved_address"
+        case parentInsightID = "parent_insight_id"
     }
 
     public init(
         id: UUID = UUID(),
         sessionID: UUID,
-        title: String,
+        userTitle: String? = nil,
         kind: Kind,
         anchor: AddressAnchor,
-        byteCount: Int = 0x200
+        byteCount: Int = 0x200,
+        parentInsightID: UUID? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
         self.createdAt = Date()
-        self.title = title
+        self.userTitle = userTitle
         self.kind = kind
         self.anchor = anchor
         self.byteCount = byteCount
+        self.parentInsightID = parentInsightID
     }
 
     public enum Kind: Int, Codable, Sendable {

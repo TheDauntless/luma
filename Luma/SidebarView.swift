@@ -702,12 +702,15 @@ private struct SidebarInsightRow: View {
     let engine: Engine
     @Binding var selection: SidebarItemID?
 
+    @State private var isRenaming = false
+    @State private var renameDraft = ""
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: insight.kind == .memory ? "memorychip" : "cpu")
                 .frame(width: subrowIconWidth, alignment: .center)
                 .font(.system(size: 12))
-            Text(insight.title)
+            Text(engine.displayTitle(for: insight))
             Spacer()
         }
         .font(.callout)
@@ -715,11 +718,27 @@ private struct SidebarInsightRow: View {
         .padding(.leading, sidebarChildIndent)
         .help(insight.anchor.displayString)
         .contextMenu {
+            Button {
+                renameDraft = engine.displayTitle(for: insight)
+                isRenaming = true
+            } label: {
+                Label("Rename…", systemImage: "pencil")
+            }
+            Divider()
             Button(role: .destructive) {
                 deleteInsight()
             } label: {
                 Label("Delete Insight", systemImage: "trash")
             }
+        }
+        .alert("Rename Insight", isPresented: $isRenaming) {
+            TextField("Name", text: $renameDraft)
+            Button("Save") {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, trimmed != engine.displayTitle(for: insight) else { return }
+                engine.renameInsight(insight, to: trimmed)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

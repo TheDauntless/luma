@@ -77,6 +77,7 @@ public enum MissionTools {
         registerPinAsInsight(in: catalog, engine: engine)
         registerListAddressInsights(in: catalog, engine: engine)
         registerUnpinInsight(in: catalog, engine: engine)
+        registerRenameInsight(in: catalog, engine: engine)
         registerDetachSession(in: catalog, engine: engine)
         registerReadWidgetState(in: catalog, engine: engine)
         registerInvokeWidgetAction(in: catalog, engine: engine)
@@ -3176,7 +3177,7 @@ public enum MissionTools {
             }
 
             let title = (invocation.args["title"] as? String) ?? finding.title
-            let insight = AddressInsight(sessionID: sessionID, title: title, kind: insightKind, anchor: anchor)
+            let insight = AddressInsight(sessionID: sessionID, userTitle: title, kind: insightKind, anchor: anchor)
 
             do {
                 try engine.store.save(insight)
@@ -3215,7 +3216,7 @@ public enum MissionTools {
                 return errorResult("missing or invalid session_id", code: .invalidInput)
             }
             let insights = engine.insightsBySession[sessionID] ?? []
-            let array: [[String: Any]] = insights.map { addressInsightJSON($0) }
+            let array: [[String: Any]] = insights.map { addressInsightJSON($0, engine: engine) }
             return makeResult(jsonObject: array, summary: "\(array.count) insight\(array.count == 1 ? "" : "s")")
         }
     }
@@ -3245,6 +3246,41 @@ public enum MissionTools {
             engine.deleteInsight(id: insightID, sessionID: sessionID)
             let payload: [String: Any] = ["insight_id": insightID.uuidString, "removed": true]
             return makeResult(jsonObject: payload, summary: "Unpinned insight \(insightID.uuidString.prefix(8))")
+        }
+    }
+
+    private static func registerRenameInsight(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "rename_insight",
+            description: "Rename a pinned address insight. Use after you've inferred what a routine does — give it a meaningful name so the new title shows in the sidebar and as an r2 flag (and as the function name if the insight sits on a function start). Keep names short, lowercase, snake or camel.",
+            inputSchemaJSON: """
+                {"type":"object","properties":{"session_id":{"type":"string"},"insight_id":{"type":"string"},"title":{"type":"string","minLength":1}},"required":["session_id","insight_id","title"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: true
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            guard let engine, let sessionID = parseSessionID(invocation.args) else {
+                return errorResult("missing or invalid session_id", code: .invalidInput)
+            }
+            guard let idString = invocation.args["insight_id"] as? String,
+                let insightID = UUID(uuidString: idString)
+            else {
+                return errorResult("missing or invalid insight_id", code: .invalidInput)
+            }
+            guard let raw = invocation.args["title"] as? String else {
+                return errorResult("missing title", code: .invalidInput)
+            }
+            let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else {
+                return errorResult("title must be non-empty", code: .invalidInput)
+            }
+            guard let insight = (engine.insightsBySession[sessionID] ?? []).first(where: { $0.id == insightID }) else {
+                return errorResult("no insight \(insightID) on session \(sessionID)", code: .notFound)
+            }
+            engine.renameInsight(insight, to: title)
+            let payload: [String: Any] = ["insight_id": insightID.uuidString, "title": title]
+            return makeResult(jsonObject: payload, summary: "Renamed insight to \"\(title)\"")
         }
     }
 
@@ -3425,10 +3461,10 @@ public enum MissionTools {
         }
     }
 
-    private static func addressInsightJSON(_ insight: AddressInsight) -> [String: Any] {
+    private static func addressInsightJSON(_ insight: AddressInsight, engine: Engine) -> [String: Any] {
         var obj: [String: Any] = [
             "id": insight.id.uuidString,
-            "title": insight.title,
+            "title": engine.displayTitle(for: insight),
             "kind": insight.kind == .disassembly ? "disassembly" : "memory",
             "anchor": insight.anchor.displayString,
             "byte_count": insight.byteCount,
