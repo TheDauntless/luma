@@ -846,6 +846,10 @@ final class TargetPicker {
         ))
 
         let executionBody = Box(orientation: .vertical, spacing: 8)
+        executionBody.marginStart = 12
+        executionBody.marginEnd = 12
+        executionBody.marginTop = 8
+        executionBody.marginBottom = 8
         let stdioRow = Box(orientation: .horizontal, spacing: 8)
         let stdioLabel = Label(str: "Stdio")
         stdioLabel.halign = .start
