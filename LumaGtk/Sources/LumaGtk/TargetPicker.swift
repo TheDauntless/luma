@@ -1710,6 +1710,7 @@ private final class SpawnSubmodeForm {
 
     private var envRowWidgets: [(row: Box, key: Entry, value: Entry)] = []
     private var envPairs: [(String, String)] = []
+    private var selectedStdio: Frida.Stdio = .pipe
 
     init() {
         argumentsEntry = Entry()
@@ -1725,10 +1726,24 @@ private final class SpawnSubmodeForm {
         stdioPipeToggle = ToggleButton()
         stdioPipeToggle.label = "Pipe to Luma"
         stdioPipeToggle.set(group: ToggleButtonRef(stdioInheritToggle.toggle_button_ptr))
+        stdioInheritToggle.active = false
         stdioPipeToggle.active = true
         autoResumeSwitch = Switch()
         autoResumeSwitch.active = true
         autoResumeSwitch.valign = .center
+
+        stdioInheritToggle.onToggled { [weak self] btn in
+            MainActor.assumeIsolated {
+                guard btn.active else { return }
+                self?.selectedStdio = .inherit
+            }
+        }
+        stdioPipeToggle.onToggled { [weak self] btn in
+            MainActor.assumeIsolated {
+                guard btn.active else { return }
+                self?.selectedStdio = .pipe
+            }
+        }
     }
 
     func arguments() -> [String] {
@@ -1753,7 +1768,7 @@ private final class SpawnSubmodeForm {
     }
 
     func stdio() -> Frida.Stdio {
-        stdioPipeToggle.active ? .pipe : .inherit
+        selectedStdio
     }
 
     func autoResume() -> Bool {
