@@ -120,10 +120,14 @@ final class TracerUIKind: InstrumentUIKind {
                     x: x,
                     y: y,
                     hook: hook,
-                    engine: engine,
-                    sessionID: sessionID,
-                    instrumentID: instrumentID,
-                    host: host
+                    actions: TracerHookContextMenu.liveActions(
+                        hook: hook,
+                        anchor: anchor,
+                        engine: engine,
+                        sessionID: sessionID,
+                        instrumentID: instrumentID,
+                        host: host
+                    )
                 )
             }
         }

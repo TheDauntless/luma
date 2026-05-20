@@ -5,100 +5,150 @@ import LumaCore
 
 @MainActor
 enum TracerHookContextMenu {
-    static func present(
-        at anchor: Widget,
-        x: Double,
-        y: Double,
-        hook: TracerConfig.Hook,
-        engine: Engine,
-        sessionID: UUID,
-        instrumentID: UUID,
-        host: InstrumentUIHost
-    ) {
+    struct Actions {
+        var toggleEnabled: (() -> Void)?
+        var setITraceArming: (ITraceArming?) -> Void
+        var itraceCaptured: () -> Int
+        var confirmDelete: () -> Void
+    }
+
+    static func sections(
+        for hook: TracerConfig.Hook,
+        anchor: Widget,
+        actions: Actions
+    ) -> [[ContextMenu.Item]] {
         var sections: [[ContextMenu.Item]] = []
 
-        sections.append([
-            .init(hook.state == .enabled ? "Disable Hook" : "Enable Hook") {
-                toggleEnabled(hook: hook, engine: engine, sessionID: sessionID)
-            }
-        ])
+        if let toggleEnabled = actions.toggleEnabled {
+            sections.append([
+                .init(hook.state == .enabled ? "Disable Hook" : "Enable Hook", handler: toggleEnabled)
+            ])
+        }
 
         if hook.kind == .function {
             var itraceItems: [ContextMenu.Item] = []
+            let openConfig: () -> Void = {
+                presentITraceConfigPopover(anchor: anchor, hook: hook, actions: actions)
+            }
             if hook.itraceArming != nil {
                 itraceItems.append(.init("Stop Instruction Trace") {
-                    applyITrace(arming: nil, hookID: hook.id, engine: engine, sessionID: sessionID)
+                    actions.setITraceArming(nil)
                 })
-                itraceItems.append(.init("Edit Instruction Trace\u{2026}") {
-                    presentITraceConfigPopover(
-                        anchor: anchor,
-                        hook: hook,
-                        engine: engine,
-                        sessionID: sessionID
-                    )
-                })
+                itraceItems.append(.init("Edit Instruction Trace\u{2026}", handler: openConfig))
             } else {
-                itraceItems.append(.init("Start Instruction Trace\u{2026}") {
-                    presentITraceConfigPopover(
-                        anchor: anchor,
-                        hook: hook,
-                        engine: engine,
-                        sessionID: sessionID
-                    )
-                })
+                itraceItems.append(.init("Start Instruction Trace\u{2026}", handler: openConfig))
             }
             sections.append(itraceItems)
         }
 
         sections.append([
-            .init("Delete Hook", destructive: true) {
-                confirmDeleteHook(
-                    anchor: anchor,
-                    hook: hook,
-                    engine: engine,
-                    sessionID: sessionID,
-                    instrumentID: instrumentID,
-                    host: host
-                )
-            }
+            .init("Delete Hook", destructive: true, handler: actions.confirmDelete)
         ])
 
-        ContextMenu.present(sections, at: anchor, x: x, y: y)
+        return sections
     }
 
-    private static func toggleEnabled(
+    static func present(
+        at anchor: Widget,
+        x: Double,
+        y: Double,
         hook: TracerConfig.Hook,
-        engine: Engine,
-        sessionID: UUID
+        actions: Actions
     ) {
-        let newState: TracerConfig.Hook.State = hook.state == .enabled ? .disabled : .enabled
-        Task { @MainActor in
-            await engine.updateTracerHook(sessionID: sessionID, hookID: hook.id) { hook in
-                hook.state = newState
-            }
-        }
+        ContextMenu.present(sections(for: hook, anchor: anchor, actions: actions), at: anchor, x: x, y: y)
     }
 
-    private static func applyITrace(
-        arming: ITraceArming?,
-        hookID: UUID,
-        engine: Engine,
-        sessionID: UUID
-    ) {
-        Task { @MainActor in
-            await engine.updateTracerHook(sessionID: sessionID, hookID: hookID) { hook in
-                hook.itraceArming = arming
-            }
-        }
-    }
-
-    private static func confirmDeleteHook(
+    static func makePopover(
+        for hook: TracerConfig.Hook,
         anchor: Widget,
+        actions: Actions,
+        dismiss: @escaping () -> Void
+    ) -> Popover {
+        let popover = Popover()
+        popover.autohide = true
+
+        let menuBox = Box(orientation: .vertical, spacing: 2)
+        menuBox.marginStart = 6
+        menuBox.marginEnd = 6
+        menuBox.marginTop = 6
+        menuBox.marginBottom = 6
+
+        let secs = sections(for: hook, anchor: anchor, actions: actions)
+        for (idx, section) in secs.enumerated() {
+            if idx > 0 {
+                menuBox.append(child: Separator(orientation: .horizontal))
+            }
+            for item in section {
+                let button = Button(label: item.label)
+                button.add(cssClass: "flat")
+                if item.isDestructive {
+                    button.add(cssClass: "luma-menu-destructive")
+                }
+                let handler = item.handler
+                button.onClicked { _ in
+                    MainActor.assumeIsolated {
+                        dismiss()
+                        handler()
+                    }
+                }
+                menuBox.append(child: button)
+            }
+        }
+        popover.set(child: menuBox)
+        return popover
+    }
+
+    static func liveActions(
         hook: TracerConfig.Hook,
+        anchor: Widget,
         engine: Engine,
         sessionID: UUID,
         instrumentID: UUID,
         host: InstrumentUIHost
+    ) -> Actions {
+        Actions(
+            toggleEnabled: {
+                let newState: TracerConfig.Hook.State = hook.state == .enabled ? .disabled : .enabled
+                Task { @MainActor in
+                    await engine.updateTracerHook(sessionID: sessionID, hookID: hook.id) { hook in
+                        hook.state = newState
+                    }
+                }
+            },
+            setITraceArming: { arming in
+                Task { @MainActor in
+                    await engine.updateTracerHook(sessionID: sessionID, hookID: hook.id) { hook in
+                        hook.itraceArming = arming
+                    }
+                }
+            },
+            itraceCaptured: {
+                let traces = engine.tracesBySession[sessionID] ?? []
+                return traces.reduce(into: 0) { count, trace in
+                    if case .functionCall(let id, _) = trace.origin, id == hook.id { count += 1 }
+                }
+            },
+            confirmDelete: {
+                presentDeleteDialog(anchor: anchor, hook: hook) {
+                    let isSelected = host.selectedComponentID(
+                        sessionID: sessionID,
+                        instrumentID: instrumentID
+                    ) == hook.id
+                    Task { @MainActor in
+                        await engine.removeTracerHook(sessionID: sessionID, hookID: hook.id)
+                        if isSelected {
+                            host.navigateToInstrument(sessionID: sessionID, instrumentID: instrumentID)
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    static func presentDeleteDialog(
+        anchor: Widget,
+        hook: TracerConfig.Hook,
+        onConfirm: @escaping () -> Void
     ) {
         let dialog = Adw.AlertDialog(
             heading: "Delete \u{201C}\(hook.displayName)\u{201D}?",
@@ -112,19 +162,7 @@ enum TracerHookContextMenu {
         dialog.onResponse { _, responseID in
             MainActor.assumeIsolated {
                 guard responseID == "delete" else { return }
-                let isSelected = host.selectedComponentID(
-                    sessionID: sessionID,
-                    instrumentID: instrumentID
-                ) == hook.id
-                Task { @MainActor in
-                    await engine.removeTracerHook(sessionID: sessionID, hookID: hook.id)
-                    if isSelected {
-                        host.navigateToInstrument(
-                            sessionID: sessionID,
-                            instrumentID: instrumentID
-                        )
-                    }
-                }
+                onConfirm()
             }
         }
         dialog.present(parent: WidgetRef(anchor))
@@ -133,29 +171,19 @@ enum TracerHookContextMenu {
     private static func presentITraceConfigPopover(
         anchor: Widget,
         hook: TracerConfig.Hook,
-        engine: Engine,
-        sessionID: UUID
+        actions: Actions
     ) {
         let popover = ITraceConfigPopover(
             hook: hook,
-            captured: itraceCaptured(for: hook.id, sessionID: sessionID, engine: engine),
-            onApply: { arming in
-                applyITrace(arming: arming, hookID: hook.id, engine: engine, sessionID: sessionID)
-            }
+            captured: actions.itraceCaptured(),
+            onApply: actions.setITraceArming
         )
         popover.present(anchor: anchor)
-    }
-
-    private static func itraceCaptured(for hookID: UUID, sessionID: UUID, engine: Engine) -> Int {
-        let traces = engine.tracesBySession[sessionID] ?? []
-        return traces.reduce(into: 0) { count, trace in
-            if case .functionCall(let id, _) = trace.origin, id == hookID { count += 1 }
-        }
     }
 }
 
 @MainActor
-private final class ITraceConfigPopover {
+final class ITraceConfigPopover {
     private static var active: ITraceConfigPopover?
 
     private let popover: Popover
