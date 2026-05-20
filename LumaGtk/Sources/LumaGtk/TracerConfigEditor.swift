@@ -14,6 +14,7 @@ final class TracerConfigEditor {
     private let sessionID: UUID
     private let apply: (Data) -> Void
     private let sharedEditor: MonacoEditor
+    private let isConfigOnly: Bool
 
     fileprivate var config: TracerConfig
     private var selectedHookID: UUID?
@@ -33,14 +34,16 @@ final class TracerConfigEditor {
         sessionID: UUID,
         config: TracerConfig,
         tracerEditor: MonacoEditor,
+        isConfigOnly: Bool = false,
         apply: @escaping (Data) -> Void
     ) {
         self.engine = engine
         self.sessionID = sessionID
         self.config = config
         self.sharedEditor = tracerEditor
+        self.isConfigOnly = isConfigOnly
         self.apply = apply
-        self.selectedHookID = nil
+        self.selectedHookID = isConfigOnly ? config.hooks.first?.id : nil
 
         widget = Box(orientation: .vertical, spacing: 0)
         widget.hexpand = true
@@ -191,6 +194,10 @@ final class TracerConfigEditor {
             return
         }
 
+        if isConfigOnly {
+            contentSlot.append(child: makeHookSwitcherRow())
+        }
+
         let editorPane = EditorPane(
             engine: engine,
             hook: selectedHook,
@@ -217,6 +224,114 @@ final class TracerConfigEditor {
         overlay.set(child: editorPane.widget)
         overlay.addOverlay(widget: saveBar.widget)
         contentSlot.append(child: overlay)
+    }
+
+    private func makeHookSwitcherRow() -> Box {
+        let row = Box(orientation: .horizontal, spacing: 8)
+        row.marginStart = 12
+        row.marginEnd = 12
+        row.marginTop = 8
+        row.marginBottom = 8
+
+        let ordered = config.hooksByMostRecentlyEdited()
+        let labels = ordered.map { $0.displayName }
+        let cStrings = labels.map { strdup($0) }
+        defer { cStrings.forEach { free($0) } }
+        var ptrs = cStrings.map { UnsafePointer($0) as UnsafePointer<CChar>? }
+        ptrs.append(nil)
+        let dropdownPtr = ptrs.withUnsafeBufferPointer { buf in
+            gtk_drop_down_new_from_strings(buf.baseAddress)
+        }!
+        g_object_ref_sink(UnsafeMutableRawPointer(dropdownPtr))
+        let dropdown = DropDown(raw: UnsafeMutableRawPointer(dropdownPtr))
+        dropdown.hexpand = true
+        if let selectedHookID,
+            let idx = ordered.firstIndex(where: { $0.id == selectedHookID })
+        {
+            dropdown.selected = idx
+        }
+        let orderedIDs = ordered.map(\.id)
+        dropdown.onNotifySelected { [weak self] dd, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let index = Int(dd.selected)
+                guard index >= 0, index < orderedIDs.count else { return }
+                let id = orderedIDs[index]
+                guard id != self.selectedHookID else { return }
+                self.selectHook(id: id)
+            }
+        }
+        row.append(child: dropdown)
+
+        if let hook = selectedHook {
+            row.append(child: makeActionsMenuButton(for: hook))
+        }
+
+        row.append(child: makeAddMenuButton())
+
+        return row
+    }
+
+    private func makeActionsMenuButton(for hook: TracerConfig.Hook) -> MenuButton {
+        let mb = MenuButton()
+        mb.set(iconName: "view-more-symbolic")
+        mb.hasFrame = false
+        mb.add(cssClass: "flat")
+        mb.tooltipText = "Hook actions"
+        mb.alwaysShowArrow = false
+
+        let actions = TracerHookContextMenu.Actions(
+            toggleEnabled: nil,
+            setITraceArming: { [weak self] arming in
+                self?.setITraceArming(id: hook.id, arming: arming)
+            },
+            itraceCaptured: { [weak self] in
+                self?.itraceCaptured(for: hook.id) ?? 0
+            },
+            confirmDelete: { [weak self, weak mb] in
+                guard let mb else { return }
+                TracerHookContextMenu.presentDeleteDialog(anchor: mb, hook: hook) {
+                    self?.deleteHook(id: hook.id)
+                }
+            }
+        )
+        mb.set(popover: TracerHookContextMenu.makePopover(for: hook, anchor: mb, actions: actions, dismiss: { [weak mb] in
+            mb?.active = false
+        }))
+        return mb
+    }
+
+    private func makeAddMenuButton() -> MenuButton {
+        let mb = MenuButton()
+        mb.set(iconName: "list-add-symbolic")
+        mb.hasFrame = false
+        mb.add(cssClass: "flat")
+        mb.tooltipText = "Add hooks by searching functions"
+        mb.alwaysShowArrow = false
+
+        let popover = Popover()
+        popover.autohide = true
+
+        let search = TracerHookSearch(
+            engine: engine,
+            sessionID: sessionID,
+            layout: .popover,
+            existingHookByAnchor: { [weak self] anchor in
+                self?.config.hooks.first(where: { $0.addressAnchor == anchor })
+            },
+            onPick: { [weak self, weak popover] apis in
+                self?.handlePickedAPIs(apis)
+                popover?.popdown()
+            },
+            onView: { [weak self, weak popover] hook in
+                popover?.popdown()
+                self?.onHookAdded?(hook.id)
+            }
+        )
+
+        popover.set(child: search.widget)
+        mb.set(popover: popover)
+        return mb
     }
 
     private var selectedHook: TracerConfig.Hook? {
@@ -327,14 +442,14 @@ final class TracerConfigEditor {
         config.hooks.append(contentsOf: newHooks)
         forceEmptyState = false
 
-        let navigateTarget: TracerConfig.Hook? = newHooks.count == 1 ? newHooks.first : nil
+        let navigateTarget: TracerConfig.Hook? = (newHooks.count == 1 || isConfigOnly) ? newHooks.first : nil
         if let target = navigateTarget {
             selectedHookID = target.id
         }
 
         emit()
 
-        if wasInEmptyMode {
+        if wasInEmptyMode || isConfigOnly {
             rebuildContent()
         } else if let target = navigateTarget {
             editorPane?.setHook(target)

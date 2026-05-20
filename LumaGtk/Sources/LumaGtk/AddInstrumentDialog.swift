@@ -568,6 +568,7 @@ final class AddInstrumentDialog {
             sessionID: sessionID,
             config: config,
             tracerEditor: sharedTracerMonaco,
+            isConfigOnly: true,
             apply: { [weak self] data in
                 MainActor.assumeIsolated { self?.pendingConfigJSON = data }
             }
