@@ -1938,6 +1938,7 @@ public final class Engine {
     public func armSession(id: UUID, matchPattern: String) async {
         guard var session = try? store.fetchSession(id: id) else { return }
         session.armingState = .armed(matchPattern: matchPattern, armedAt: Date())
+        session.lastArmPattern = matchPattern
         clearGatingErrorIfPresent(&session)
         saveSession(session)
         broadcastArmingChangeIfHosting(session)
@@ -1969,7 +1970,7 @@ public final class Engine {
         config: SpawnConfig,
         matchPattern: String
     ) async -> ProcessSession {
-        let session = ProcessSession(
+        var session = ProcessSession(
             kind: .spawn(config),
             deviceID: device.id,
             deviceName: device.name,
@@ -1977,6 +1978,7 @@ public final class Engine {
             lastKnownPID: 0,
             armingState: .armed(matchPattern: matchPattern, armedAt: Date())
         )
+        session.lastArmPattern = matchPattern
         createSession(session)
         announceArmedSessionIfCollaborative(session)
         gatingIntendedDevices.insert(device.id)

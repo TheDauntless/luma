@@ -169,6 +169,12 @@ public struct ProcessSession: Codable, Identifiable, Sendable, FetchableRecord, 
         }
     }
 
+    public var supportsArmForNextLaunch: Bool {
+        guard case .spawn = kind else { return false }
+        if case .armed = armingState { return true }
+        return lastArmPattern != nil
+    }
+
     public enum Phase: Int, Codable, Sendable {
         case idle
         case attaching

@@ -2816,16 +2816,16 @@ final class MainWindow: InstrumentUIHost {
             })
         }
 
-        let armingItem: ContextMenu.Item
+        var armingSection: [ContextMenu.Item] = []
         if isArmed(session) {
-            armingItem = .init("Disarm") { [weak self] in self?.disarm(sessionID: session.id) }
-        } else {
-            armingItem = .init("Arm for Next Launch…") { [weak self] in self?.presentArmDialog(session: session) }
+            armingSection.append(.init("Disarm") { [weak self] in self?.disarm(sessionID: session.id) })
+        } else if session.supportsArmForNextLaunch {
+            armingSection.append(.init("Arm for Next Launch…") { [weak self] in self?.presentArmDialog(session: session) })
         }
 
         ContextMenu.present([
             topSection,
-            [armingItem],
+            armingSection,
             [.init("Delete Session", destructive: true) { [weak self] in self?.confirmDeleteSession(session) }],
         ], at: anchor, x: x, y: y)
     }

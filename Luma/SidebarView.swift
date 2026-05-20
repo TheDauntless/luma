@@ -412,15 +412,13 @@ private struct SidebarSessionHeaderRow: View {
 
     @ViewBuilder
     private var armingMenuButton: some View {
-        if case .attach = session.kind {
-            EmptyView()
-        } else if isArmed {
+        if isArmed {
             Button {
                 disarm()
             } label: {
                 Label("Disarm", systemImage: "scope")
             }
-        } else {
+        } else if session.supportsArmForNextLaunch {
             Button {
                 presentArmPrompt()
             } label: {
