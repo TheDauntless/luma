@@ -399,6 +399,12 @@ private struct LumaExportDocument: FileDocument {
             try fm.copyItem(at: tracesSource, to: tracesDest)
         }
 
+        let eventsSource = sourceURL.appendingPathComponent("events.log")
+        let eventsDest = staging.appendingPathComponent("events.log")
+        if fm.fileExists(atPath: eventsSource.path) {
+            try fm.copyItem(at: eventsSource, to: eventsDest)
+        }
+
         return try FileWrapper(url: staging, options: .immediate)
     }
 }

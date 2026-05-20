@@ -8,9 +8,8 @@ public actor EventStore {
     private let byteCap: Int
     private var fileSize: Int
 
-    public init(directory: URL, byteCap: Int = defaultByteCap) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        self.fileURL = directory.appendingPathComponent("events.log")
+    public init(fileURL: URL, byteCap: Int = defaultByteCap) {
+        self.fileURL = fileURL
         self.byteCap = byteCap
         self.fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0
     }

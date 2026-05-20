@@ -33,7 +33,7 @@ public struct LumaDocument: Sendable, Equatable {
     public var sqliteURL: URL { url.appendingPathComponent("db.sqlite") }
     public var sqlitePath: String { sqliteURL.path }
     public var tracesDirectory: URL { url.appendingPathComponent("traces", isDirectory: true) }
-    public var eventsDirectory: URL { url.appendingPathComponent("events", isDirectory: true) }
+    public var eventsLogURL: URL { url.appendingPathComponent("events.log") }
 
     public init(storage: Storage) {
         self.storage = storage

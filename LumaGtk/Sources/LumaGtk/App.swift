@@ -141,7 +141,7 @@ final class LumaApplication {
 
             let store = try ProjectStore(path: document.sqlitePath)
             let traces = try TraceStore(directory: document.tracesDirectory)
-            let eventStore = try? EventStore(directory: document.eventsDirectory)
+            let eventStore = EventStore(fileURL: document.eventsLogURL)
             let engine = Engine(
                 store: store,
                 traces: traces,

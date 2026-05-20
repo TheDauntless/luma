@@ -69,6 +69,12 @@ struct LumaProject: FileDocument {
         if fm.fileExists(atPath: tracesSource.path) {
             try fm.copyItem(at: tracesSource, to: tracesDest)
         }
+
+        let eventsSource = source.appendingPathComponent("events.log")
+        let eventsDest = destination.appendingPathComponent("events.log")
+        if fm.fileExists(atPath: eventsSource.path) {
+            try fm.copyItem(at: eventsSource, to: eventsDest)
+        }
     }
 
     private func copyFileWrapper(_ wrapper: FileWrapper, to destination: URL) throws {

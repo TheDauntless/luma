@@ -21,12 +21,12 @@ public final class EngineRegistry {
         let fm = FileManager.default
         let dbURL = key.appendingPathComponent("db.sqlite")
         let tracesURL = key.appendingPathComponent("traces", isDirectory: true)
-        let eventsURL = key.appendingPathComponent("events", isDirectory: true)
+        let eventsURL = key.appendingPathComponent("events.log")
         try fm.createDirectory(at: key, withIntermediateDirectories: true)
         try fm.createDirectory(at: tracesURL, withIntermediateDirectories: true)
         let store = try ProjectStore(path: dbURL.path)
         let traces = try TraceStore(directory: tracesURL)
-        let eventStore = try? EventStore(directory: eventsURL)
+        let eventStore = EventStore(fileURL: eventsURL)
         let engine = Engine(
             store: store,
             traces: traces,
