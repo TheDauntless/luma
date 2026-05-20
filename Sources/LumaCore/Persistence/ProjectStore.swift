@@ -1334,13 +1334,9 @@ public final class ProjectStore: Sendable {
     // MARK: - Schema
 
     private static func openSchema(_ db: Database) throws {
-        let userTableCount = try Int.fetchOne(
-            db,
-            sql: "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        ) ?? 0
         let storedVersion = try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0
 
-        if userTableCount == 0 {
+        if try !db.tableExists("process_session") {
             try createSchema(db)
             try db.execute(sql: "PRAGMA user_version = \(currentSchemaVersion)")
             return
