@@ -163,9 +163,6 @@ enum SessionDetachedBanner {
     }
 
     private static func statusText(for session: LumaCore.ProcessSession) -> String? {
-        if session.phase == .attaching {
-            return "\(session.kind.reestablishLabel)ing\u{2026}"
-        }
         if let lastError = session.lastError, !lastError.isEmpty {
             return "Last \(session.kind.verbDisplayName) attempt failed: \(lastError)"
         }
@@ -185,7 +182,7 @@ enum SessionDetachedBanner {
 
     static func shouldShow(for session: LumaCore.ProcessSession) -> Bool {
         if session.phase == .attached { return false }
-        if session.phase == .attaching && session.lastAttachedAt == nil { return false }
+        if session.phase == .attaching { return false }
         return true
     }
 }
