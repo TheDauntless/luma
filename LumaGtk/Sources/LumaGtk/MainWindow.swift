@@ -216,9 +216,8 @@ final class MainWindow: InstrumentUIHost {
         self.addInstrumentButton = addInstrumentButton
 
         let newSessionButton = Button()
-        newSessionButton.set(iconName: "list-add-symbolic")
+        newSessionButton.set(iconName: "find-location-symbolic")
         newSessionButton.tooltipText = "New Session\u{2026}"
-        newSessionButton.add(cssClass: "suggested-action")
         header.packEnd(child: newSessionButton)
 
         let sidebar = buildSidebar()
