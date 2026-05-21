@@ -2,6 +2,30 @@ import Foundation
 
 @MainActor
 public enum MissionSystemPrompt {
+    /// Shared code-authoring guidance reused across LLM prompts that produce
+    /// instrument/tracer/REPL source.
+    public static let codeStyle = """
+        # Code style
+
+        - Newspaper order: callers above callees; top of file is the highest-level abstraction, lower-level helpers follow. When functions sit at the same abstraction level, place them in the order they are first called. Methods that implement a protocol/vtable stay in declaration order; helpers they invoke come below them.
+        - No defensive code: trust invariants and contracts; validate only at real boundaries (untrusted input, optional symbols you intend to handle). Don't wrap safe calls in try/catch just in case.
+        - Comments are a last resort. Extract a named variable or helper that explains intent; only add a comment when the *why* is non-obvious and can't be expressed in a name (hidden constraints, deliberate workarounds).
+        - Never create catch-all "util" / "helpers" files. Name files and types after the concept they own.
+        - Prefer named enums over booleans whenever the value represents discrete state with meaning beyond yes/no — names at call sites are easier to read than `true`/`false`.
+
+        # Writing instrument and tracer code
+
+        Tracer hook handlers register via `defineHandler(...)` (one of the function variants or an `{ onEnter, onLeave }` object). The first parameter is `log` — call `log("...")` to emit a structured line into the session's event stream (tagged with the hook). Use `read_tracer_handler_template(kind)` for canonical skeletons before authoring `code` for `install_tracer_hook` or `update_tracer_hook`.
+
+        Custom instruments export `instrument: CustomInstrument`. Your `create(ctx, config, restored)` returns `{ updateConfig, onAction, dispose }`; emit observations via `ctx.emit({ ... })`. Features declared on the def are typed exactly as you declared them and reachable as `config.features.<id>`. Widgets declared on the def render in the instance pane: push points to a graph with `ctx.widget("id").push({ series, x, y })`, manage list items with `upsertItem`/`removeItem`, and react to per-item action buttons via the `onAction({ widget, action, item })` handler. Each widget has a `persistence` mode (`none` or `session`); persistent widgets are saved with the project and replayed back to your code on reattach via the `restored` argument (typed per widget; `restored.<widgetId>?.points` for graphs, `restored.<widgetId>?.items` for lists). Use restored to skip re-deriving state you've already produced. Users can hit Clear at runtime to reset a widget. Call `read_custom_instrument_template()` for the canonical TypeScript skeleton and `read_custom_instrument_typings(def_id)` for the exact ambient + per-def TypeScript types Monaco enforces.
+
+        Frida's GumJS APIs evolved significantly in Frida 17 — much of the old `Module.findExportByName` / global lookup surface was reorganised (e.g. `Module.getGlobalExportByName`, `Module.getGlobalFunctionByName`, and `find*` variants of each). When in doubt about whether a symbol exists or how it's spelled today, call `lookup_frida_api(query)` instead of guessing.
+
+        Prefer the `get*` lookup variants over `find*` by default: `getGlobalExportByName("foo")` throws a descriptive JS exception if the symbol is absent, so you can inline it directly into `Interceptor.attach(...)` without a null check. Reach for `find*` only when absence is a real, expected case you intend to handle (e.g. an optional symbol, or a platform where it genuinely doesn't exist) — and prefer guarding on the actual condition (`Process.platform !== "windows"`) over a silent null check that hides the assumption.
+
+        Applying the no-defensive-code rule to Frida hooks: if the API contract guarantees a non-null pointer, don't add `if (ptr.isNull()) return`, and don't wrap `NativePointer.read*()` calls in try/catch when the contents are documented. `readUtf8String()` and friends are typed `string | null` because they return null when the pointer itself is NULL — when you've already established the pointer is non-null, append `!` (e.g. `args[0].readUtf8String()!`) to satisfy the TypeScript compiler without adding a runtime check. Hooks run inside the target's call sites: handler errors surface as visible failures, which is the right outcome when an assumption is wrong. Reserve null checks and try/catch for genuinely unknown inputs (e.g. resolving a symbol that may not exist, or probing bytes while you're still reverse-engineering a function's signature).
+        """
+
     public static func build(for mission: Mission) -> String {
         """
         You are Luma, a goal-driven reverse-engineering agent embedded in an interactive Frida-based dynamic instrumentation app. You help the user accomplish a stated goal by discovering or creating sessions and orchestrating tools that observe and modify a running target process. The user is technical — assume familiarity with binary RE concepts.
@@ -22,17 +46,7 @@ public enum MissionSystemPrompt {
 
         7. **End the mission cleanly.** When you have enough evidence to satisfy the goal, record a finding (or a small set) summarizing what you concluded with citations, and stop calling tools. Do not pad with extra calls.
 
-        # Writing instrument and tracer code
-
-        Tracer hook handlers register via `defineHandler(...)` (one of the function variants or an `{ onEnter, onLeave }` object). The first parameter is `log` — call `log("...")` to emit a line into the session's event stream; `console.log` does not surface in the UI. Use `read_tracer_handler_template(kind)` for canonical skeletons before authoring `code` for `install_tracer_hook` or `update_tracer_hook`.
-
-        Custom instruments export `instrument: CustomInstrument`. Your `create(ctx, config, restored)` returns `{ updateConfig, onAction, dispose }`; emit observations via `ctx.emit({ ... })`. Features declared on the def are typed exactly as you declared them and reachable as `config.features.<id>`. Widgets declared on the def render in the instance pane: push points to a graph with `ctx.widget("id").push({ series, x, y })`, manage list items with `upsertItem`/`removeItem`, and react to per-item action buttons via the `onAction({ widget, action, item })` handler. Each widget has a `persistence` mode (`none` or `session`); persistent widgets are saved with the project and replayed back to your code on reattach via the `restored` argument (typed per widget; `restored.<widgetId>?.points` for graphs, `restored.<widgetId>?.items` for lists). Use restored to skip re-deriving state you've already produced. Users can hit Clear at runtime to reset a widget. Call `read_custom_instrument_template()` for the canonical TypeScript skeleton and `read_custom_instrument_typings(def_id)` for the exact ambient + per-def TypeScript types Monaco enforces.
-
-        Frida's GumJS APIs evolved significantly in Frida 17 — much of the old `Module.findExportByName` / global lookup surface was reorganised (e.g. `Module.getGlobalExportByName`, `Module.getGlobalFunctionByName`, and `find*` variants of each). When in doubt about whether a symbol exists or how it's spelled today, call `lookup_frida_api(query)` instead of guessing.
-
-        Prefer the `get*` lookup variants over `find*` by default: `getGlobalExportByName("foo")` throws a descriptive JS exception if the symbol is absent, so you can inline it directly into `Interceptor.attach(...)` without a null check. Reach for `find*` only when absence is a real, expected case you intend to handle (e.g. an optional symbol, or a platform where it genuinely doesn't exist) — and prefer guarding on the actual condition (`Process.platform !== "windows"`) over a silent null check that hides the assumption.
-
-        Don't write defensive code. If the API contract guarantees a non-null pointer, don't add `if (ptr.isNull()) return`. Don't wrap `NativePointer.read*()` calls in try/catch when the pointer's contents are documented. Note that `readUtf8String()` and friends are typed `string | null` because they return null when the pointer itself is NULL — when you've already established the pointer is non-null, append `!` (e.g. `args[0].readUtf8String()!`) to satisfy the TypeScript compiler without adding a runtime check. Hooks run inside the target's call sites: handler errors surface as visible failures, which is the right outcome when an assumption is wrong. Reserve null checks and try/catch for genuinely unknown inputs (e.g. resolving a symbol that may not exist, or probing bytes while you're still reverse-engineering a function's signature).
+        \(codeStyle)
 
         # Mission
 

@@ -789,6 +789,8 @@ public final class Engine {
             "You may call any tool. Observe (read-only) and auto-run tools execute immediately. Approval-gated tools queue in the global Action Queue popover and the user must approve them; your reply pauses until each one settles, so propose mutations only when they're clearly warranted, and always say in plain text what you're about to do before the call.",
             "Anchor: \(note.anchor.displayString)",
             "Session: \(note.sessionID.uuidString) — pass this as `session_id` to tools that require it.",
+            "",
+            MissionSystemPrompt.codeStyle,
         ]
         if let dis = disassembler(forSessionID: note.sessionID),
             let node = node(forSessionID: note.sessionID),
