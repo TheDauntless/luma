@@ -255,7 +255,7 @@ public enum MissionTools {
                     processName: process.name,
                     lastKnownPID: pid
                 )
-                try? engine.store.save(session)
+                engine.createSession(session)
                 do {
                     let attached = try await engine.attach(device: device, process: process, session: session)
                     return attachSuccessResult(session: attached, process: process, device: device, reused: false, successVerb: "Attached")
@@ -333,7 +333,7 @@ public enum MissionTools {
                 processName: config.defaultDisplayName,
                 lastKnownPID: 0
             )
-            try? engine.store.save(session)
+            engine.createSession(session)
             do {
                 let attached = try await engine.spawnAndAttach(device: device, session: session)
                 return spawnSuccessResult(session: attached, processName: config.defaultDisplayName, device: device, autoResume: autoResume, reused: false, successVerb: "Spawned")
