@@ -57,6 +57,7 @@ public enum MissionTools {
         registerListCustomInstrumentFiles(in: catalog, engine: engine)
         registerReadCustomInstrumentFile(in: catalog, engine: engine)
         registerWriteCustomInstrumentFile(in: catalog, engine: engine)
+        registerEditCustomInstrumentFile(in: catalog, engine: engine)
         registerDeleteCustomInstrumentFile(in: catalog, engine: engine)
         registerRenameCustomInstrumentFile(in: catalog, engine: engine)
         registerSetCustomInstrumentEntrypoint(in: catalog, engine: engine)
@@ -1721,7 +1722,7 @@ public enum MissionTools {
     private static func registerReadCustomInstrumentFile(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "read_custom_instrument_file",
-            description: "Read one file's TypeScript source from a custom instrument.",
+            description: "Read one file's TypeScript source from a custom instrument. The result includes `line_count` so you can target edit_custom_instrument_file precisely (lines are 1-based).",
             inputSchemaJSON: """
                 {"type":"object","properties":{"def_id":{"type":"string"},"path":{"type":"string"}},"required":["def_id","path"],"additionalProperties":false}
                 """,
@@ -1731,7 +1732,12 @@ public enum MissionTools {
         catalog.register(spec: spec) { [weak engine] invocation in
             await withResolvedCustomInstrumentFile(invocation.args, engine: engine) { _, defID, _, file in
                 makeResult(
-                    jsonObject: ["def_id": defID.uuidString, "path": file.path, "content": file.content],
+                    jsonObject: [
+                        "def_id": defID.uuidString,
+                        "path": file.path,
+                        "content": file.content,
+                        "line_count": lineCount(of: file.content),
+                    ],
                     summary: "Read \(file.path)"
                 )
             }
@@ -1758,6 +1764,53 @@ public enum MissionTools {
                 }
                 await engine.writeCustomInstrumentFile(defID: defID, path: path, content: content)
                 return makeResult(jsonObject: ["def_id": defID.uuidString, "path": path], summary: "Wrote \(path)")
+            }
+        }
+    }
+
+    private static func registerEditCustomInstrumentFile(in catalog: ToolCatalog, engine: Engine) {
+        let spec = ActionSpec(
+            name: "edit_custom_instrument_file",
+            description: """
+                Replace a contiguous range of lines in one file of a custom instrument. Lines are 1-based and inclusive; \
+                `start_line` is the first line replaced and `end_line` is the last. To insert without replacing, pass \
+                `end_line = start_line - 1` (inserts before `start_line`); to append, use `start_line = line_count + 1, \
+                end_line = line_count`. `new_content` may span multiple lines and does not need a trailing newline. Prefer \
+                this over write_custom_instrument_file for targeted edits to large files. Running instances are recompiled.
+                """,
+            inputSchemaJSON: """
+                {"type":"object","properties":{"def_id":{"type":"string"},"path":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":0},"new_content":{"type":"string"}},"required":["def_id","path","start_line","end_line","new_content"],"additionalProperties":false}
+                """,
+            isObserve: false,
+            requiresSession: false
+        )
+        catalog.register(spec: spec) { [weak engine] invocation in
+            await withResolvedCustomInstrumentFile(invocation.args, engine: engine) { engine, defID, _, file in
+                guard let startLine = invocation.args["start_line"] as? Int else {
+                    return errorResult("missing or invalid start_line", code: .invalidInput)
+                }
+                guard let endLine = invocation.args["end_line"] as? Int else {
+                    return errorResult("missing or invalid end_line", code: .invalidInput)
+                }
+                guard let newContent = invocation.args["new_content"] as? String else {
+                    return errorResult("missing new_content", code: .invalidInput)
+                }
+                let updated: String
+                switch spliceLines(in: file.content, startLine: startLine, endLine: endLine, replacement: newContent) {
+                case .success(let result):
+                    updated = result
+                case .failure(let message):
+                    return errorResult(message, code: .invalidInput)
+                }
+                await engine.writeCustomInstrumentFile(defID: defID, path: file.path, content: updated)
+                return makeResult(
+                    jsonObject: [
+                        "def_id": defID.uuidString,
+                        "path": file.path,
+                        "line_count": lineCount(of: updated),
+                    ],
+                    summary: "Edited \(file.path) lines \(startLine)–\(endLine)"
+                )
             }
         }
     }
@@ -3510,6 +3563,41 @@ public enum MissionTools {
     }
 
     // MARK: - helpers
+
+    private static func lineCount(of content: String) -> Int {
+        if content.isEmpty { return 0 }
+        var count = content.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        if !content.hasSuffix("\n") { count += 1 }
+        return count
+    }
+
+    private enum SpliceOutcome {
+        case success(String)
+        case failure(String)
+    }
+
+    private static func spliceLines(in content: String, startLine: Int, endLine: Int, replacement: String) -> SpliceOutcome {
+        let hasTrailingNewline = content.hasSuffix("\n")
+        var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if hasTrailingNewline, !lines.isEmpty {
+            lines.removeLast()
+        }
+        let total = lines.count
+        if startLine < 1 || startLine > total + 1 {
+            return .failure("start_line \(startLine) out of range (file has \(total) line\(total == 1 ? "" : "s"))")
+        }
+        if endLine < startLine - 1 || endLine > total {
+            return .failure("end_line \(endLine) out of range for start_line \(startLine) (file has \(total) line\(total == 1 ? "" : "s"))")
+        }
+        var insertion = replacement.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if replacement.hasSuffix("\n"), !insertion.isEmpty {
+            insertion.removeLast()
+        }
+        lines.replaceSubrange((startLine - 1)..<endLine, with: insertion)
+        let joined = lines.joined(separator: "\n")
+        let needsTrailingNewline = hasTrailingNewline || !replacement.isEmpty
+        return .success(needsTrailingNewline && !joined.hasSuffix("\n") ? joined + "\n" : joined)
+    }
 
     private static func parseSessionID(_ args: [String: Any]) -> UUID? {
         guard let str = args["session_id"] as? String else { return nil }
