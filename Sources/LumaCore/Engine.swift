@@ -90,6 +90,8 @@ public final class Engine {
     @ObservationIgnored private var cachedNodeModulesSnapshotFiles: [EditorFSSnapshotFile]?
 
     private var addressActionProviders: [AddressActionProvider] = []
+    private var runningCustomInstrumentReloads: Set<UUID> = []
+    private var pendingCustomInstrumentReloads: Set<UUID> = []
     private var threadActionProviders: [ThreadActionProvider] = []
     @ObservationIgnored public var onSessionListChanged: (@MainActor (SessionListChange) -> Void)?
     @ObservationIgnored public var onREPLCellAdded: (@MainActor (REPLCell) -> Void)?
@@ -876,9 +878,7 @@ public final class Engine {
                 bundle.def.normalize()
                 try? self.store.save(bundle.def)
                 try? self.store.replaceCustomInstrumentFiles(defID: bundle.def.id, files: bundle.files)
-                Task { @MainActor in
-                    await self.reloadCustomInstrumentInstances(defID: bundle.def.id)
-                }
+                self.scheduleCustomInstrumentReload(defID: bundle.def.id)
             case .remove(let r):
                 try? self.store.deleteCustomInstrumentDef(id: r.defID)
             }
@@ -912,10 +912,8 @@ public final class Engine {
                 try? self.store.save(bundle.def)
                 try? self.store.replaceCustomInstrumentFiles(defID: bundle.def.id, files: bundle.files)
             }
-            Task { @MainActor in
-                for bundle in normalized {
-                    await self.reloadCustomInstrumentInstances(defID: bundle.def.id)
-                }
+            for bundle in normalized {
+                self.scheduleCustomInstrumentReload(defID: bundle.def.id)
             }
         }
 
@@ -4160,9 +4158,22 @@ public final class Engine {
     }
 
     private func scheduleCustomInstrumentReload(defID: UUID) {
-        Task { [weak self] in
-            await self?.reloadCustomInstrumentInstances(defID: defID)
+        if runningCustomInstrumentReloads.contains(defID) {
+            pendingCustomInstrumentReloads.insert(defID)
+            return
         }
+        runningCustomInstrumentReloads.insert(defID)
+        Task { [weak self] in
+            await self?.drainCustomInstrumentReloads(defID: defID)
+        }
+    }
+
+    private func drainCustomInstrumentReloads(defID: UUID) async {
+        repeat {
+            pendingCustomInstrumentReloads.remove(defID)
+            await reloadCustomInstrumentInstances(defID: defID)
+        } while pendingCustomInstrumentReloads.contains(defID)
+        runningCustomInstrumentReloads.remove(defID)
     }
 
     private func touchUpdatedAt(defID: UUID) -> CustomInstrumentDef {
