@@ -27,9 +27,24 @@
                 guard let self, !message.isLocal else { return }
                 notifier.notifyChatMessage(message, labID: self.collaboration.labID)
             }
+
+            var seenPending: Set<UUID> = Set(((try? store.fetchAllPendingMissionActions()) ?? []).map(\.id))
+            let observation = store.observeAllPendingMissionActions { rows in
+                Task { @MainActor in
+                    let currentIDs = Set(rows.map(\.id))
+                    let arrivals = rows.filter { !seenPending.contains($0.id) }
+                    seenPending = currentIDs
+                    guard let newest = arrivals.max(by: { $0.requestedAt < $1.requestedAt }) else { return }
+                    notifier.notifyActionAwaitingApproval(newest, additionalPending: arrivals.count - 1)
+                }
+            }
+            pendingActionObservations[key] = observation
         }
     }
 
     @MainActor
     private var enginesWithLocalNotifier: [ObjectIdentifier: LocalNotifier] = [:]
+
+    @MainActor
+    private var pendingActionObservations: [ObjectIdentifier: LumaCore.StoreObservation] = [:]
 #endif

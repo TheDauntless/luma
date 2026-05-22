@@ -40,6 +40,21 @@ final class DesktopNotifier {
         )
     }
 
+    func notifyActionAwaitingApproval(_ action: MissionAction, additionalPending: Int) {
+        let body: String
+        if additionalPending > 0 {
+            body = "\(action.toolName) (+\(additionalPending) more pending)"
+        } else {
+            body = action.toolName
+        }
+        deliver(
+            kind: "mission-action-pending",
+            title: "Luma needs approval",
+            body: body,
+            labID: nil
+        )
+    }
+
     func notifyEntryAdded(_ entry: NotebookEntry, labID: String?) {
         let author = entry.author?.name ?? "Someone"
         let title = entry.title.isEmpty ? "(untitled)" : entry.title

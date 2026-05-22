@@ -95,6 +95,8 @@ final class MainWindow: InstrumentUIHost {
     private var eventStreamHost: Box!
     private var detailHost: Widget!
     private var toastOverlay: ToastOverlay!
+    private var pendingActionsObservation: LumaCore.StoreObservation?
+    private var seenPendingActionIDs: Set<UUID> = []
 
     private var isCollaborationPanelVisible: Bool {
         engine?.projectUIState.isCollaborationPanelVisible ?? false
@@ -389,6 +391,14 @@ final class MainWindow: InstrumentUIHost {
         return "Luma — \(document.displayName)"
     }
 
+    private func handlePendingActionsChange(_ rows: [MissionAction]) {
+        let currentIDs = Set(rows.map(\.id))
+        let arrivals = rows.filter { !seenPendingActionIDs.contains($0.id) }
+        seenPendingActionIDs = currentIDs
+        guard let newest = arrivals.max(by: { $0.requestedAt < $1.requestedAt }) else { return }
+        desktopNotifier.notifyActionAwaitingApproval(newest, additionalPending: arrivals.count - 1)
+    }
+
     private func persistWindowState() {
         var width: Int32 = 0
         var height: Int32 = 0
@@ -458,6 +468,12 @@ final class MainWindow: InstrumentUIHost {
                 !engine.collaboration.isSelf(authorID)
             else { return }
             self.desktopNotifier.notifyEntryAdded(entry, labID: engine.collaboration.labID)
+        }
+        seenPendingActionIDs = Set(((try? engine.store.fetchAllPendingMissionActions()) ?? []).map(\.id))
+        pendingActionsObservation = engine.store.observeAllPendingMissionActions { [weak self] rows in
+            Task { @MainActor in
+                self?.handlePendingActionsChange(rows)
+            }
         }
         engine.onInstalledPackagesChanged = { [weak self] packages in self?.renderPackages(packages) }
         engine.onUserNotification = { [weak self] notification in
