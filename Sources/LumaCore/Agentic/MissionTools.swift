@@ -1482,7 +1482,7 @@ public enum MissionTools {
     private static func registerReadTracerHook(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "read_tracer_hook",
-            description: "Read a tracer hook's full body, including its JS handler code. The result includes `line_count` so you can target edit_tracer_hook precisely (lines are 1-based). Use this only when you intend to read or edit the code; list_tracer_hooks is cheaper for surveying hooks.",
+            description: "Read a tracer hook's full body, including its JS handler code. The `code` field is line-numbered (1-based, `<lineno>\\t<text>\\n`); strip the prefix before reuse. `line_count` is also returned. Use this only when you intend to read or edit the code; list_tracer_hooks is cheaper for surveying hooks.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"session_id":{"type":"string"},"hook_id":{"type":"string"}},"required":["session_id","hook_id"],"additionalProperties":false}
                 """,
@@ -1500,7 +1500,7 @@ public enum MissionTools {
                 return errorResult("no tracer hook with id \(hookID)", code: .notFound)
             }
             var payload = hookListEntry(hook)
-            payload["code"] = hook.code
+            payload["code"] = numberedContent(hook.code)
             payload["line_count"] = lineCount(of: hook.code)
             return makeResult(jsonObject: payload, summary: "Hook \(hook.displayName)")
         }
@@ -1777,7 +1777,7 @@ public enum MissionTools {
     private static func registerReadCustomInstrumentFile(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
             name: "read_custom_instrument_file",
-            description: "Read one file's TypeScript source from a custom instrument. The result includes `line_count` so you can target edit_custom_instrument_file precisely (lines are 1-based).",
+            description: "Read one file's TypeScript source from a custom instrument. The `content` field is line-numbered (1-based, `<lineno>\\t<text>\\n`) so you can target edit_custom_instrument_file precisely; strip the prefix before reusing the text elsewhere. `line_count` is also returned.",
             inputSchemaJSON: """
                 {"type":"object","properties":{"def_id":{"type":"string"},"path":{"type":"string"}},"required":["def_id","path"],"additionalProperties":false}
                 """,
@@ -1790,7 +1790,7 @@ public enum MissionTools {
                     jsonObject: [
                         "def_id": defID.uuidString,
                         "path": file.path,
-                        "content": file.content,
+                        "content": numberedContent(file.content),
                         "line_count": lineCount(of: file.content),
                     ],
                     summary: "Read \(file.path)"
@@ -3624,6 +3624,23 @@ public enum MissionTools {
         var count = content.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
         if !content.hasSuffix("\n") { count += 1 }
         return count
+    }
+
+    private static func numberedContent(_ content: String) -> String {
+        if content.isEmpty { return "" }
+        var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if content.hasSuffix("\n") {
+            lines.removeLast()
+        }
+        let width = max(4, String(lines.count).count)
+        var result = ""
+        result.reserveCapacity(content.count + lines.count * (width + 2))
+        for (index, line) in lines.enumerated() {
+            let n = String(index + 1)
+            let pad = String(repeating: " ", count: width - n.count)
+            result += pad + n + "\t" + line + "\n"
+        }
+        return result
     }
 
     private enum SpliceOutcome {
