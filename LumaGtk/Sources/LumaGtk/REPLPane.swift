@@ -228,7 +228,7 @@ final class REPLPane {
         prompt.add(cssClass: "monospace")
         prompt.add(cssClass: "dim-label")
         codeRow.append(child: prompt)
-        let codeLabel = Label(str: cell.code)
+        let codeLabel = Label(str: DisplayTruncation.truncated(cell.code))
         codeLabel.add(cssClass: "monospace")
         codeLabel.add(cssClass: "repl-cell-code")
         codeLabel.halign = .start
@@ -286,7 +286,7 @@ final class REPLPane {
     }
 
     private func makePlainResultLabel(text: String) -> Widget {
-        let label = Label(str: text)
+        let label = Label(str: DisplayTruncation.truncated(text))
         label.add(cssClass: "monospace")
         label.halign = .start
         label.hexpand = true

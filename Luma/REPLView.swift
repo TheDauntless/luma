@@ -423,7 +423,7 @@ private struct REPLCellView: View {
                     Text("›")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    Text(cell.code)
+                    Text(DisplayTruncation.truncated(cell.code))
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
 
@@ -441,7 +441,7 @@ private struct REPLCellView: View {
 
                     switch cell.result {
                     case .text(let s):
-                        Text(s)
+                        Text(DisplayTruncation.truncated(s))
                             .textSelection(.enabled)
 
                     case .js(let v):

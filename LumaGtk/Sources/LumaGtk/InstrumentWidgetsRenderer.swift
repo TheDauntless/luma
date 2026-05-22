@@ -387,7 +387,7 @@ private final class ConsoleWidget {
             valueWidgetKeepers.append(valueWidget)
             return valueWidget.widget
         }
-        let body = Label(str: entry.text)
+        let body = Label(str: DisplayTruncation.truncated(entry.text))
         body.add(cssClass: "monospace")
         if let cssClass { body.add(cssClass: cssClass) }
         body.halign = .start
@@ -401,7 +401,7 @@ private final class ConsoleWidget {
         let box = Box(orientation: .vertical, spacing: 4)
         box.halign = .start
         if !text.isEmpty {
-            let caption = Label(str: text)
+            let caption = Label(str: DisplayTruncation.truncated(text))
             caption.add(cssClass: "monospace")
             caption.halign = .start
             caption.wrap = true

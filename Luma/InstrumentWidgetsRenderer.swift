@@ -406,7 +406,7 @@ private struct ConsoleWidgetView: View {
         if let image = entry.image, let nsImage = NSImage(data: image.data) {
             VStack(alignment: .leading, spacing: 2) {
                 if !entry.text.isEmpty {
-                    Text(entry.text).textSelection(.enabled)
+                    Text(DisplayTruncation.truncated(entry.text)).textSelection(.enabled)
                 }
                 Image(nsImage: nsImage)
                     .resizable()
@@ -422,7 +422,7 @@ private struct ConsoleWidgetView: View {
                 selection: selection
             )
         } else {
-            Text(entry.text)
+            Text(DisplayTruncation.truncated(entry.text))
                 .foregroundStyle(entry.kind == .error ? Color.red : .primary)
                 .textSelection(.enabled)
         }
