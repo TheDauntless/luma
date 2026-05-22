@@ -159,7 +159,7 @@ struct CustomInstrumentWidgetsPopover: View {
         var updated = def
         updated.widgets = draftWidgets
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

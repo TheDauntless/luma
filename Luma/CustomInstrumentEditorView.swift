@@ -169,7 +169,7 @@ struct CustomInstrumentEditorView: View {
         let pathToSave = file.path
         let content = draftContent
         Task { @MainActor in
-            await engine.writeCustomInstrumentFile(defID: defID, path: pathToSave, content: content)
+            engine.writeCustomInstrumentFile(defID: defID, path: pathToSave, content: content)
             isDirty = false
             showSavedCheck = true
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -182,7 +182,7 @@ struct CustomInstrumentEditorView: View {
         let pathToSave = file.path
         let content = draftContent
         Task { @MainActor in
-            await engine.writeCustomInstrumentFile(defID: defID, path: pathToSave, content: content)
+            engine.writeCustomInstrumentFile(defID: defID, path: pathToSave, content: content)
         }
     }
 
@@ -372,7 +372,7 @@ struct CustomInstrumentFeaturesPopover: View {
         var updated = def
         updated.features = draftFeatures
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

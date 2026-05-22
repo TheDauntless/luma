@@ -105,7 +105,7 @@ struct CustomInstrumentCompatibilityPopover: View {
             archs: draftArchs
         )
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

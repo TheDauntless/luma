@@ -1715,7 +1715,7 @@ public enum MissionTools {
                 def.compatibility = compatibility
                 def.features = features
                 def.widgets = widgets
-                await engine.updateCustomInstrument(def)
+                engine.updateCustomInstrument(def)
             }
             return makeResult(
                 jsonObject: ["def_id": def.id.uuidString, "name": def.name, "entrypoint": def.entrypoint],
@@ -1752,7 +1752,7 @@ public enum MissionTools {
                 if invocation.args["widgets"] != nil {
                     def.widgets = parseWidgetsArg(invocation.args["widgets"])
                 }
-                await engine.updateCustomInstrument(def)
+                engine.updateCustomInstrument(def)
                 return makeResult(jsonObject: ["def_id": def.id.uuidString, "name": def.name], summary: "Updated custom instrument \(def.name)")
             }
         }
@@ -1823,7 +1823,7 @@ public enum MissionTools {
                 guard let content = invocation.args["content"] as? String else {
                     return errorResult("missing content", code: .invalidInput)
                 }
-                await engine.writeCustomInstrumentFile(defID: defID, path: path, content: content)
+                engine.writeCustomInstrumentFile(defID: defID, path: path, content: content)
                 return makeResult(jsonObject: ["def_id": defID.uuidString, "path": path], summary: "Wrote \(path)")
             }
         }
@@ -1864,7 +1864,7 @@ public enum MissionTools {
                 case .failure(let message):
                     return errorResult(message, code: .invalidInput)
                 }
-                await engine.writeCustomInstrumentFile(defID: defID, path: file.path, content: updated)
+                engine.writeCustomInstrumentFile(defID: defID, path: file.path, content: updated)
                 return makeResult(
                     jsonObject: [
                         "def_id": defID.uuidString,
@@ -1892,7 +1892,7 @@ public enum MissionTools {
                 if def.entrypoint == file.path {
                     return errorResult("cannot delete entrypoint '\(file.path)' — re-point with set_custom_instrument_entrypoint first", code: .invalidInput)
                 }
-                await engine.deleteCustomInstrumentFile(defID: defID, path: file.path)
+                engine.deleteCustomInstrumentFile(defID: defID, path: file.path)
                 return makeResult(jsonObject: ["def_id": defID.uuidString, "path": file.path], summary: "Deleted \(file.path)")
             }
         }
@@ -1918,7 +1918,7 @@ public enum MissionTools {
                 guard engine.customInstruments.file(defID: defID, path: from) != nil else {
                     return errorResult("no file '\(from)'", code: .notFound)
                 }
-                await engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
+                engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
                 return makeResult(jsonObject: ["def_id": defID.uuidString, "from": from, "to": to], summary: "Renamed \(from) → \(to)")
             }
         }
@@ -1936,7 +1936,7 @@ public enum MissionTools {
         )
         catalog.register(spec: spec) { [weak engine] invocation in
             await withResolvedCustomInstrumentFile(invocation.args, engine: engine) { engine, defID, _, file in
-                await engine.setCustomInstrumentEntrypoint(defID: defID, path: file.path)
+                engine.setCustomInstrumentEntrypoint(defID: defID, path: file.path)
                 return makeResult(jsonObject: ["def_id": defID.uuidString, "entrypoint": file.path], summary: "Entrypoint set to \(file.path)")
             }
         }

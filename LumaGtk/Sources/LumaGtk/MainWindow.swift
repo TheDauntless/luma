@@ -1489,7 +1489,7 @@ final class MainWindow: InstrumentUIHost {
     private func setCustomInstrumentEntrypoint(defID: UUID, path: String) {
         guard let engine else { return }
         Task { @MainActor in
-            await engine.setCustomInstrumentEntrypoint(defID: defID, path: path)
+            engine.setCustomInstrumentEntrypoint(defID: defID, path: path)
         }
     }
 
@@ -1507,7 +1507,7 @@ final class MainWindow: InstrumentUIHost {
             let path = file.path
             let entrypoint = def.entrypoint
             Task { @MainActor in
-                await engine.deleteCustomInstrumentFile(defID: defID, path: path)
+                engine.deleteCustomInstrumentFile(defID: defID, path: path)
                 if self.selection == .customInstrumentFile(defID, path) {
                     self.select(.customInstrumentFile(defID, entrypoint))
                 }

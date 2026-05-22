@@ -25,7 +25,7 @@ enum CustomInstrumentFileDialogs {
             },
             onCommit: { input in
                 Task { @MainActor in
-                    await engine.writeCustomInstrumentFile(defID: defID, path: input, content: "")
+                    engine.writeCustomInstrumentFile(defID: defID, path: input, content: "")
                     onCreated(input)
                 }
             }
@@ -57,7 +57,7 @@ enum CustomInstrumentFileDialogs {
             },
             onCommit: { input in
                 Task { @MainActor in
-                    await engine.renameCustomInstrumentFile(defID: defID, from: oldPath, to: input)
+                    engine.renameCustomInstrumentFile(defID: defID, from: oldPath, to: input)
                     onRenamed(input)
                 }
             }

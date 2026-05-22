@@ -4114,7 +4114,7 @@ public final class Engine {
         return def
     }
 
-    public func updateCustomInstrument(_ def: CustomInstrumentDef) async {
+    public func updateCustomInstrument(_ def: CustomInstrumentDef) {
         var updated = def
         updated.normalize()
         updated.updatedAt = Date()
@@ -4122,25 +4122,25 @@ public final class Engine {
         registerDescriptor(customInstruments.descriptor(for: updated))
         broadcastCustomInstrumentUpsert(defID: updated.id)
         onSessionListChanged?(.customInstrumentDefsChanged)
-        await reloadCustomInstrumentInstances(defID: updated.id)
+        scheduleCustomInstrumentReload(defID: updated.id)
     }
 
-    public func writeCustomInstrumentFile(defID: UUID, path: String, content: String) async {
+    public func writeCustomInstrumentFile(defID: UUID, path: String, content: String) {
         let file = CustomInstrumentFile(defID: defID, path: path, content: content)
         try? store.save(file)
         try? store.save(touchUpdatedAt(defID: defID))
         broadcastCustomInstrumentUpsert(defID: defID)
-        await reloadCustomInstrumentInstances(defID: defID)
+        scheduleCustomInstrumentReload(defID: defID)
     }
 
-    public func deleteCustomInstrumentFile(defID: UUID, path: String) async {
+    public func deleteCustomInstrumentFile(defID: UUID, path: String) {
         try? store.deleteCustomInstrumentFile(defID: defID, path: path)
         try? store.save(touchUpdatedAt(defID: defID))
         broadcastCustomInstrumentUpsert(defID: defID)
-        await reloadCustomInstrumentInstances(defID: defID)
+        scheduleCustomInstrumentReload(defID: defID)
     }
 
-    public func renameCustomInstrumentFile(defID: UUID, from: String, to: String) async {
+    public func renameCustomInstrumentFile(defID: UUID, from: String, to: String) {
         try? store.renameCustomInstrumentFile(defID: defID, from: from, to: to)
         var def = touchUpdatedAt(defID: defID)
         if def.entrypoint == from {
@@ -4148,15 +4148,21 @@ public final class Engine {
         }
         try? store.save(def)
         broadcastCustomInstrumentUpsert(defID: defID)
-        await reloadCustomInstrumentInstances(defID: defID)
+        scheduleCustomInstrumentReload(defID: defID)
     }
 
-    public func setCustomInstrumentEntrypoint(defID: UUID, path: String) async {
+    public func setCustomInstrumentEntrypoint(defID: UUID, path: String) {
         var def = touchUpdatedAt(defID: defID)
         def.entrypoint = path
         try? store.save(def)
         broadcastCustomInstrumentUpsert(defID: defID)
-        await reloadCustomInstrumentInstances(defID: defID)
+        scheduleCustomInstrumentReload(defID: defID)
+    }
+
+    private func scheduleCustomInstrumentReload(defID: UUID) {
+        Task { [weak self] in
+            await self?.reloadCustomInstrumentInstances(defID: defID)
+        }
     }
 
     private func touchUpdatedAt(defID: UUID) -> CustomInstrumentDef {

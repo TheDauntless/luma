@@ -252,7 +252,7 @@ struct SidebarCustomInstrumentDefRow: View {
         guard !trimmed.isEmpty else { return }
         let defID = def.id
         Task { @MainActor in
-            await engine.writeCustomInstrumentFile(defID: defID, path: trimmed, content: "")
+            engine.writeCustomInstrumentFile(defID: defID, path: trimmed, content: "")
             selection = .customInstrumentFile(defID, trimmed)
         }
         addFilePrompt.reset()
@@ -264,7 +264,7 @@ struct SidebarCustomInstrumentDefRow: View {
         guard !to.isEmpty, to != from else { return }
         let defID = def.id
         Task { @MainActor in
-            await engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
+            engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
             if selection == .customInstrumentFile(defID, from) {
                 selection = .customInstrumentFile(defID, to)
             }
@@ -376,7 +376,7 @@ struct SidebarCustomInstrumentFileRow: View {
         let defID = def.id
         let path = file.path
         Task { @MainActor in
-            await engine.setCustomInstrumentEntrypoint(defID: defID, path: path)
+            engine.setCustomInstrumentEntrypoint(defID: defID, path: path)
         }
     }
 
@@ -386,7 +386,7 @@ struct SidebarCustomInstrumentFileRow: View {
         guard !to.isEmpty, to != from else { return }
         let defID = def.id
         Task { @MainActor in
-            await engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
+            engine.renameCustomInstrumentFile(defID: defID, from: from, to: to)
             if selection == .customInstrumentFile(defID, from) {
                 selection = .customInstrumentFile(defID, to)
             }
@@ -399,7 +399,7 @@ struct SidebarCustomInstrumentFileRow: View {
         let path = file.path
         let entrypoint = def.entrypoint
         Task { @MainActor in
-            await engine.deleteCustomInstrumentFile(defID: defID, path: path)
+            engine.deleteCustomInstrumentFile(defID: defID, path: path)
             if selection == .customInstrumentFile(defID, path) {
                 selection = .customInstrumentFile(defID, entrypoint)
             }
@@ -588,7 +588,7 @@ struct CustomInstrumentRenamePopover: View {
         updated.name = draftName.trimmingCharacters(in: .whitespaces)
         updated.icon = draftIcon
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
             dismiss()
         }
     }

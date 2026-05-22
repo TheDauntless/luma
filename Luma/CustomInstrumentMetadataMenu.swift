@@ -107,8 +107,8 @@ struct CustomInstrumentMetadataMenu: View {
         guard !trimmed.isEmpty, let original = def?.entrypoint, trimmed != original else { return }
         let id = defID
         Task { @MainActor in
-            await engine.renameCustomInstrumentFile(defID: id, from: original, to: trimmed)
-            await engine.setCustomInstrumentEntrypoint(defID: id, path: trimmed)
+            engine.renameCustomInstrumentFile(defID: id, from: original, to: trimmed)
+            engine.setCustomInstrumentEntrypoint(defID: id, path: trimmed)
             if selection == .customInstrumentFile(id, original) {
                 selection = .customInstrumentFile(id, trimmed)
             }

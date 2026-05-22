@@ -207,7 +207,7 @@ final class CustomInstrumentFeaturesDialog {
         let engine = self.engine
         let dialog = self.dialog
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
             _ = dialog.close()
         }
     }

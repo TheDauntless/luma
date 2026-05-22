@@ -162,7 +162,7 @@ final class CustomInstrumentRenameDialog {
         updated.icon = draftIcon
         let engine = self.engine
         Task { @MainActor in
-            await engine.updateCustomInstrument(updated)
+            engine.updateCustomInstrument(updated)
         }
     }
 
