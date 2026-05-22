@@ -5,6 +5,7 @@ import SwiftyR2
 @MainActor
 public enum MissionTools {
     public static let resultByteCap = 16 * 1024
+    public static let stringValueByteCap = 2 * 1024
 
     public static let requestUserInputToolName = "request_user_input"
 
@@ -3714,13 +3715,30 @@ public enum MissionTools {
     }
 
     private static func makeResult(jsonObject: Any, summary: String) -> ActionResult {
-        let data = (try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys])) ?? Data("{}".utf8)
+        let scrubbed = truncatingOversizedStrings(jsonObject, cap: stringValueByteCap)
+        let data = (try? JSONSerialization.data(withJSONObject: scrubbed, options: [.sortedKeys])) ?? Data("{}".utf8)
         var json = String(data: data, encoding: .utf8) ?? "{}"
         if json.utf8.count > resultByteCap {
             json = String(json.prefix(resultByteCap))
             json += "\n/* truncated — request a narrower view */"
         }
         return ActionResult(summary: summary, resultJSON: json)
+    }
+
+    private static func truncatingOversizedStrings(_ value: Any, cap: Int) -> Any {
+        if let str = value as? String {
+            let byteCount = str.utf8.count
+            if byteCount <= cap { return str }
+            let head = String(decoding: str.utf8.prefix(cap), as: UTF8.self)
+            return "\(head)… <truncated; original \(byteCount) bytes>"
+        }
+        if let dict = value as? [String: Any] {
+            return dict.mapValues { truncatingOversizedStrings($0, cap: cap) }
+        }
+        if let arr = value as? [Any] {
+            return arr.map { truncatingOversizedStrings($0, cap: cap) }
+        }
+        return value
     }
 
     private static func errorResult(_ message: String, code: ToolErrorCode = .failed) -> ActionResult {
