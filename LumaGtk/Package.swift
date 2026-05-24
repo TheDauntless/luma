@@ -38,6 +38,9 @@ func adwaitaFeatureDefines() -> [SwiftSetting] {
     if pkgConfigAtLeast("libadwaita-1", "1.6") {
         defines.append(.define("HAS_ADW_SPINNER"))
     }
+    if pkgConfigAtLeast("libadwaita-1", "1.8") {
+        defines.append(.define("HAS_ADW_SHORTCUTS_DIALOG"))
+    }
     return defines
 }
 

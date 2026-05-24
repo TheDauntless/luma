@@ -379,16 +379,11 @@ final class LumaApplication {
             }
         }
 
-        setAccel(appPtr: appPtr, action: "app.new-window", accel: "<Primary>n")
-        setAccel(appPtr: appPtr, action: "app.open", accel: "<Primary>o")
-        setAccel(appPtr: appPtr, action: "app.save-as", accel: "<Primary><Shift>s")
-        setAccel(appPtr: appPtr, action: "app.close-window", accel: "<Primary>w")
-        setAccel(appPtr: appPtr, action: "app.new-session", accel: "<Primary><Alt>n")
-        setAccel(appPtr: appPtr, action: "app.add-instrument", accel: "<Primary><Shift>i")
-        setAccel(appPtr: appPtr, action: "app.resume-process", accel: "<Primary>r")
-        setAccel(appPtr: appPtr, action: "app.manage-packages", accel: "<Primary><Alt>p")
-        setAccel(appPtr: appPtr, action: "app.toggle-collaboration", accel: "<Primary><Alt>c")
-        setAccel(appPtr: appPtr, action: "app.show-help-overlay", accel: "<Primary>question")
+        for group in Self.shortcutGroups {
+            for item in group.items {
+                setAccel(appPtr: appPtr, action: item.action, accel: item.accel)
+            }
+        }
 
         primaryMenuPtr = luma_menu_new()
         rebuildPrimaryMenu()
@@ -457,37 +452,110 @@ final class LumaApplication {
     }
 
     private func presentShortcutsDialog() {
+        #if HAS_ADW_SHORTCUTS_DIALOG
         let dialog = Adw.ShortcutsDialog()
+        for group in Self.shortcutGroups {
+            let section = Adw.ShortcutsSection(title: group.title)
+            for item in group.items {
+                section.add(item: Adw.ShortcutsItem(action: item.title, actionName: item.action))
+            }
+            dialog.add(section: section)
+        }
+        let parent = activeWindow()?.window
+        dialog.present(parent: parent)
+        #else
+        presentLegacyShortcutsDialog()
+        #endif
+    }
 
-        let windows = Adw.ShortcutsSection(title: "General")
-        windows.add(item: shortcutItem("New Window", action: "app.new-window"))
-        windows.add(item: shortcutItem("Open Project\u{2026}", action: "app.open"))
-        windows.add(item: shortcutItem("Save As\u{2026}", action: "app.save-as"))
-        windows.add(item: shortcutItem("Close Window", action: "app.close-window"))
-        windows.add(item: shortcutItem("Keyboard Shortcuts", action: "app.show-help-overlay"))
-        dialog.add(section: windows)
+    #if !HAS_ADW_SHORTCUTS_DIALOG
+    private func presentLegacyShortcutsDialog() {
+        let dialog = Adw.Dialog()
+        dialog.set(title: "Keyboard Shortcuts")
+        dialog.set(contentWidth: 480)
+        dialog.set(contentHeight: 560)
 
-        let sessions = Adw.ShortcutsSection(title: "Sessions")
-        sessions.add(item: shortcutItem("New Session\u{2026}", action: "app.new-session"))
-        sessions.add(item: shortcutItem("Add Instrument\u{2026}", action: "app.add-instrument"))
-        sessions.add(item: shortcutItem("Resume Process", action: "app.resume-process"))
-        dialog.add(section: sessions)
+        let content = Box(orientation: .vertical, spacing: 16)
+        content.marginStart = 24
+        content.marginEnd = 24
+        content.marginTop = 12
+        content.marginBottom = 24
 
-        let packages = Adw.ShortcutsSection(title: "Packages")
-        packages.add(item: shortcutItem("Install Package\u{2026}", action: "app.manage-packages"))
-        dialog.add(section: packages)
+        for group in Self.shortcutGroups {
+            let title = Label(str: group.title)
+            title.add(cssClass: "heading")
+            title.halign = .start
+            content.append(child: title)
 
-        let collaboration = Adw.ShortcutsSection(title: "Collaboration")
-        collaboration.add(item: shortcutItem("Toggle Collaboration Panel", action: "app.toggle-collaboration"))
-        dialog.add(section: collaboration)
+            let list = ListBox()
+            list.selectionMode = .none
+            list.add(cssClass: "boxed-list")
+            for item in group.items {
+                let row = Adw.ActionRow()
+                row.set(title: item.title)
+                let label = Label(str: Self.humanReadableAccel(item.accel))
+                label.add(cssClass: "dim-label")
+                row.add(suffix: label)
+                list.append(child: row)
+            }
+            content.append(child: list)
+        }
+
+        let scroll = ScrolledWindow()
+        scroll.hexpand = true
+        scroll.vexpand = true
+        scroll.set(child: content)
+
+        let header = Adw.HeaderBar()
+        let toolbarView = Adw.ToolbarView()
+        toolbarView.addTopBar(widget: header)
+        toolbarView.set(content: scroll)
+        dialog.set(child: toolbarView)
 
         let parent = activeWindow()?.window
         dialog.present(parent: parent)
     }
 
-    private func shortcutItem(_ title: String, action: String) -> Adw.ShortcutsItem {
-        Adw.ShortcutsItem(action: title, actionName: action)
+    private static func humanReadableAccel(_ accel: String) -> String {
+        var keyval: guint = 0
+        var rawMods = GdkModifierType(rawValue: 0)
+        _ = Gtk.acceleratorParse(accelerator: accel, acceleratorKey: &keyval, acceleratorMods: &rawMods)
+        let mods = Gdk.ModifierType(rawValue: UInt32(rawMods.rawValue))
+        return Gtk.acceleratorGetLabel(acceleratorKey: Int(keyval), acceleratorMods: mods)
     }
+    #endif
+
+    private struct ShortcutEntry {
+        let title: String
+        let action: String
+        let accel: String
+    }
+
+    private struct ShortcutGroup {
+        let title: String
+        let items: [ShortcutEntry]
+    }
+
+    private static let shortcutGroups: [ShortcutGroup] = [
+        ShortcutGroup(title: "General", items: [
+            ShortcutEntry(title: "New Window", action: "app.new-window", accel: "<Primary>n"),
+            ShortcutEntry(title: "Open Project\u{2026}", action: "app.open", accel: "<Primary>o"),
+            ShortcutEntry(title: "Save As\u{2026}", action: "app.save-as", accel: "<Primary><Shift>s"),
+            ShortcutEntry(title: "Close Window", action: "app.close-window", accel: "<Primary>w"),
+            ShortcutEntry(title: "Keyboard Shortcuts", action: "app.show-help-overlay", accel: "<Primary>question"),
+        ]),
+        ShortcutGroup(title: "Sessions", items: [
+            ShortcutEntry(title: "New Session\u{2026}", action: "app.new-session", accel: "<Primary><Alt>n"),
+            ShortcutEntry(title: "Add Instrument\u{2026}", action: "app.add-instrument", accel: "<Primary><Shift>i"),
+            ShortcutEntry(title: "Resume Process", action: "app.resume-process", accel: "<Primary>r"),
+        ]),
+        ShortcutGroup(title: "Packages", items: [
+            ShortcutEntry(title: "Install Package\u{2026}", action: "app.manage-packages", accel: "<Primary><Alt>p"),
+        ]),
+        ShortcutGroup(title: "Collaboration", items: [
+            ShortcutEntry(title: "Toggle Collaboration Panel", action: "app.toggle-collaboration", accel: "<Primary><Alt>c"),
+        ]),
+    ]
 
     private func presentAboutDialog() {
         let dialog = Adw.AboutDialog()
