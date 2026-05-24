@@ -3,70 +3,6 @@
 import Foundation
 import PackageDescription
 
-func pkgConfigFlags(_ packages: [String], libs: Bool = false) -> [String] {
-    guard let pkgConfigPath = findOnPath("pkg-config") else { return [] }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: pkgConfigPath)
-    proc.arguments = (libs ? ["--libs"] : ["--cflags"]) + packages
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = FileHandle.nullDevice
-    try? proc.run()
-    proc.waitUntilExit()
-    guard proc.terminationStatus == 0 else { return [] }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    return String(data: data, encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: " ")
-        .map(String.init) ?? []
-}
-
-func pkgConfigAtLeast(_ package: String, _ version: String) -> Bool {
-    guard let pkgConfigPath = findOnPath("pkg-config") else { return false }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: pkgConfigPath)
-    proc.arguments = ["--atleast-version=\(version)", package]
-    proc.standardOutput = FileHandle.nullDevice
-    proc.standardError = FileHandle.nullDevice
-    try? proc.run()
-    proc.waitUntilExit()
-    return proc.terminationStatus == 0
-}
-
-func adwaitaFeatureDefines() -> [SwiftSetting] {
-    var defines: [SwiftSetting] = []
-    if pkgConfigAtLeast("libadwaita-1", "1.6") {
-        defines.append(.define("HAS_ADW_SPINNER"))
-    }
-    if pkgConfigAtLeast("libadwaita-1", "1.8") {
-        defines.append(.define("HAS_ADW_SHORTCUTS_DIALOG"))
-    }
-    return defines
-}
-
-func findOnPath(_ name: String) -> String? {
-    #if os(Windows)
-    let separator: Character = ";"
-    let extensions = ["", ".exe", ".cmd", ".bat"]
-    let pathSep = "\\"
-    #else
-    let separator: Character = ":"
-    let extensions = [""]
-    let pathSep = "/"
-    #endif
-    let env = ProcessInfo.processInfo.environment
-    guard let pathValue = env["PATH"] ?? env["Path"] else { return nil }
-    for dir in pathValue.split(separator: separator).map(String.init) where !dir.isEmpty {
-        for ext in extensions {
-            let candidate = dir + pathSep + name + ext
-            if FileManager.default.fileExists(atPath: candidate) {
-                return candidate
-            }
-        }
-    }
-    return nil
-}
-
 let lumaGtkTargetDir = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .appendingPathComponent("Sources/LumaGtk", isDirectory: true).path
@@ -80,23 +16,6 @@ let lumaGtkExcludes: [String] = ["luma.rc", "luma.res"].filter { name in
 }
 
 #if os(Windows)
-func compileWindowsExecutableIcon() -> String? {
-    let pkg = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-    let rcFile = pkg + "\\Sources\\LumaGtk\\luma.rc"
-    let resFile = pkg + "\\Sources\\LumaGtk\\luma.res"
-    guard FileManager.default.fileExists(atPath: rcFile) else { return nil }
-    if let rc = findOnPath("rc") {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: rc)
-        proc.arguments = ["/nologo", "/fo", resFile, rcFile]
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        try? proc.run()
-        proc.waitUntilExit()
-        if proc.terminationStatus == 0 { return resFile }
-    }
-    return FileManager.default.fileExists(atPath: resFile) ? resFile : nil
-}
 let lumaExecutableIconResource = compileWindowsExecutableIcon()
 #endif
 
@@ -223,3 +142,87 @@ let package = Package(
         ),
     ]
 )
+
+#if os(Windows)
+func compileWindowsExecutableIcon() -> String? {
+    let pkg = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+    let rcFile = pkg + "\\Sources\\LumaGtk\\luma.rc"
+    let resFile = pkg + "\\Sources\\LumaGtk\\luma.res"
+    guard FileManager.default.fileExists(atPath: rcFile) else { return nil }
+    if let rc = findOnPath("rc") {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: rc)
+        proc.arguments = ["/nologo", "/fo", resFile, rcFile]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        proc.waitUntilExit()
+        if proc.terminationStatus == 0 { return resFile }
+    }
+    return FileManager.default.fileExists(atPath: resFile) ? resFile : nil
+}
+#endif
+
+func adwaitaFeatureDefines() -> [SwiftSetting] {
+    var defines: [SwiftSetting] = []
+    if pkgConfigAtLeast("libadwaita-1", "1.6") {
+        defines.append(.define("HAS_ADW_SPINNER"))
+    }
+    if pkgConfigAtLeast("libadwaita-1", "1.8") {
+        defines.append(.define("HAS_ADW_SHORTCUTS_DIALOG"))
+    }
+    return defines
+}
+
+func pkgConfigFlags(_ packages: [String], libs: Bool = false) -> [String] {
+    guard let pkgConfigPath = findOnPath("pkg-config") else { return [] }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: pkgConfigPath)
+    proc.arguments = (libs ? ["--libs"] : ["--cflags"]) + packages
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
+    proc.waitUntilExit()
+    guard proc.terminationStatus == 0 else { return [] }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    return String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .split(separator: " ")
+        .map(String.init) ?? []
+}
+
+func pkgConfigAtLeast(_ package: String, _ version: String) -> Bool {
+    guard let pkgConfigPath = findOnPath("pkg-config") else { return false }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: pkgConfigPath)
+    proc.arguments = ["--atleast-version=\(version)", package]
+    proc.standardOutput = FileHandle.nullDevice
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
+    proc.waitUntilExit()
+    return proc.terminationStatus == 0
+}
+
+func findOnPath(_ name: String) -> String? {
+    #if os(Windows)
+    let separator: Character = ";"
+    let extensions = ["", ".exe", ".cmd", ".bat"]
+    let pathSep = "\\"
+    #else
+    let separator: Character = ":"
+    let extensions = [""]
+    let pathSep = "/"
+    #endif
+    let env = ProcessInfo.processInfo.environment
+    guard let pathValue = env["PATH"] ?? env["Path"] else { return nil }
+    for dir in pathValue.split(separator: separator).map(String.init) where !dir.isEmpty {
+        for ext in extensions {
+            let candidate = dir + pathSep + name + ext
+            if FileManager.default.fileExists(atPath: candidate) {
+                return candidate
+            }
+        }
+    }
+    return nil
+}
