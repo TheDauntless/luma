@@ -50,12 +50,12 @@ public enum MissionTools {
         registerUpdateTracerHook(in: catalog, engine: engine)
         registerEditTracerHook(in: catalog, engine: engine)
         registerRemoveTracerHook(in: catalog, engine: engine)
-        registerListCustomInstruments(in: catalog, engine: engine)
+        registerListInstruments(in: catalog, engine: engine)
+        registerAttachInstrument(in: catalog, engine: engine)
         registerReadCustomInstrument(in: catalog, engine: engine)
         registerCreateCustomInstrument(in: catalog, engine: engine)
         registerUpdateCustomInstrument(in: catalog, engine: engine)
         registerDeleteCustomInstrument(in: catalog, engine: engine)
-        registerAttachCustomInstrument(in: catalog, engine: engine)
         registerListCustomInstrumentFiles(in: catalog, engine: engine)
         registerReadCustomInstrumentFile(in: catalog, engine: engine)
         registerWriteCustomInstrumentFile(in: catalog, engine: engine)
@@ -1728,10 +1728,10 @@ public enum MissionTools {
 
     // MARK: - custom instruments
 
-    private static func registerListCustomInstruments(in catalog: ToolCatalog, engine: Engine) {
+    private static func registerListInstruments(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
-            name: "list_custom_instruments",
-            description: "List custom instrument definitions in this project (id, name, icon, feature_count, widget_count). Source code is not included — fetch via read_custom_instrument.",
+            name: "list_instruments",
+            description: "List instrument definitions known to this project — both editable custom instruments and shipped hookpacks. Each entry has `id` (opaque descriptor id; pass to attach_instrument), `kind` (custom | hookpack), `name`, `icon`. Custom instruments also report `def_id` (UUID for the custom_instrument_file/def tools) and source counts.",
             inputSchemaJSON: """
                 {"type":"object","properties":{},"additionalProperties":false}
                 """,
@@ -1740,17 +1740,34 @@ public enum MissionTools {
         )
         catalog.register(spec: spec) { [weak engine] _ in
             guard let engine else { return errorResult("engine unavailable", code: .unavailable) }
-            let array: [[String: Any]] = engine.customInstruments.defs.map { def in
-                [
-                    "id": def.id.uuidString,
-                    "name": def.name,
-                    "icon": describeIcon(def.icon),
-                    "feature_count": def.features.count,
-                    "widget_count": def.widgets.count,
-                ]
-            }
-            return makeResult(jsonObject: array, summary: "\(array.count) custom instrument\(array.count == 1 ? "" : "s")")
+            let array: [[String: Any]] = engine.descriptors.compactMap { instrumentDescriptorListEntry($0, engine: engine) }
+            return makeResult(jsonObject: array, summary: "\(array.count) instrument\(array.count == 1 ? "" : "s")")
         }
+    }
+
+    private static func instrumentDescriptorListEntry(_ descriptor: InstrumentDescriptor, engine: Engine) -> [String: Any]? {
+        var entry: [String: Any] = [
+            "id": descriptor.id,
+            "name": descriptor.displayName,
+            "icon": describeIcon(descriptor.icon),
+        ]
+        switch descriptor.kind {
+        case .tracer:
+            entry["kind"] = "tracer"
+        case .custom:
+            guard let defID = UUID(uuidString: descriptor.sourceIdentifier),
+                let def = engine.customInstruments.def(withId: defID)
+            else { return nil }
+            entry["kind"] = "custom"
+            entry["def_id"] = defID.uuidString
+            entry["feature_count"] = def.features.count
+            entry["widget_count"] = def.widgets.count
+        case .hookPack:
+            entry["kind"] = "hookpack"
+        case .codeShare:
+            return nil
+        }
+        return entry
     }
 
     private static func registerReadCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
@@ -2136,12 +2153,12 @@ public enum MissionTools {
         }
     }
 
-    private static func registerAttachCustomInstrument(in catalog: ToolCatalog, engine: Engine) {
+    private static func registerAttachInstrument(in catalog: ToolCatalog, engine: Engine) {
         let spec = ActionSpec(
-            name: "attach_custom_instrument",
-            description: "Attach a custom instrument definition to an existing session. Each session can hold multiple custom instances; this tool always creates a new instance.",
+            name: "attach_instrument",
+            description: "Attach an instrument (tracer, custom instrument, or hookpack) to a session. Pass the `id` returned by list_instruments. An instrument can only be attached once per session; calling again returns the existing instance with `already_attached: true`.",
             inputSchemaJSON: """
-                {"type":"object","properties":{"session_id":{"type":"string"},"def_id":{"type":"string"}},"required":["session_id","def_id"],"additionalProperties":false}
+                {"type":"object","properties":{"session_id":{"type":"string"},"id":{"type":"string","description":"Descriptor id from list_instruments"}},"required":["session_id","id"],"additionalProperties":false}
                 """,
             isObserve: false,
             requiresSession: true
@@ -2150,18 +2167,42 @@ public enum MissionTools {
             guard let engine, let sessionID = parseSessionID(invocation.args) else {
                 return errorResult("missing or invalid session_id", code: .invalidInput)
             }
-            guard let defID = (invocation.args["def_id"] as? String).flatMap(UUID.init(uuidString:)) else {
-                return errorResult("missing or invalid def_id", code: .invalidInput)
+            guard let descriptorID = invocation.args["id"] as? String, !descriptorID.isEmpty else {
+                return errorResult("missing id", code: .invalidInput)
             }
-            guard let instance = await engine.attachCustomInstrument(sessionID: sessionID, defID: defID) else {
-                return errorResult("could not attach: no custom instrument with id \(defID)", code: .notFound)
+            guard let descriptor = engine.descriptor(withID: descriptorID) else {
+                return errorResult("no instrument with id '\(descriptorID)'", code: .notFound)
+            }
+            guard descriptor.kind != .codeShare else {
+                return errorResult("codeshare snippets are attached via their own flow, not via this tool", code: .invalidInput)
+            }
+            if let existing = engine.instrumentsBySession[sessionID]?.first(where: {
+                $0.kind == descriptor.kind && $0.sourceIdentifier == descriptor.sourceIdentifier
+            }) {
+                let payload: [String: Any] = [
+                    "instrument_id": existing.id.uuidString,
+                    "id": descriptor.id,
+                    "kind": descriptor.kind.rawValue,
+                    "session_id": sessionID.uuidString,
+                    "already_attached": true,
+                ]
+                return makeResult(jsonObject: payload, summary: "\(descriptor.displayName) already attached to session")
+            }
+            guard let instance = await engine.addInstrument(
+                kind: descriptor.kind,
+                sourceIdentifier: descriptor.sourceIdentifier,
+                configJSON: descriptor.makeInitialConfigJSON(),
+                sessionID: sessionID
+            ) else {
+                return errorResult("could not attach \(descriptor.displayName) to session", code: .unavailable)
             }
             let payload: [String: Any] = [
                 "instrument_id": instance.id.uuidString,
-                "def_id": defID.uuidString,
+                "id": descriptor.id,
+                "kind": descriptor.kind.rawValue,
                 "session_id": sessionID.uuidString,
             ]
-            return makeResult(jsonObject: payload, summary: "Attached custom instrument to session")
+            return makeResult(jsonObject: payload, summary: "Attached \(descriptor.displayName) to session")
         }
     }
 

@@ -1838,6 +1838,10 @@ public final class Engine {
 
     // MARK: - Descriptor Registry
 
+    public func descriptor(withID id: String) -> InstrumentDescriptor? {
+        descriptorsByID[id]
+    }
+
     public func registerDescriptor(_ descriptor: InstrumentDescriptor) {
         if let idx = descriptors.firstIndex(where: { $0.id == descriptor.id }) {
             descriptors[idx] = descriptor
@@ -4447,20 +4451,7 @@ public final class Engine {
         }
     }
 
-    public func attachCustomInstrument(sessionID: UUID, defID: UUID) async -> InstrumentInstance? {
-        guard let def = customInstruments.def(withId: defID) else { return nil }
-        let states = CustomInstrumentLibrary.initialFeatureStates(for: def)
-        let config = CustomInstrumentConfig(defID: defID, features: states)
-        let configJSON = (try? JSONEncoder().encode(config)) ?? Data("{}".utf8)
-        return await addInstrument(
-            kind: .custom,
-            sourceIdentifier: defID.uuidString,
-            configJSON: configJSON,
-            sessionID: sessionID
-        )
-    }
-
-    public func deleteCustomInstrument(_ defID: UUID) async {
+public func deleteCustomInstrument(_ defID: UUID) async {
         let key = defID.uuidString
         let doomedInstances = instrumentsBySession.values
             .flatMap { $0 }
