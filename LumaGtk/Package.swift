@@ -21,6 +21,26 @@ func pkgConfigFlags(_ packages: [String], libs: Bool = false) -> [String] {
         .map(String.init) ?? []
 }
 
+func pkgConfigAtLeast(_ package: String, _ version: String) -> Bool {
+    guard let pkgConfigPath = findOnPath("pkg-config") else { return false }
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: pkgConfigPath)
+    proc.arguments = ["--atleast-version=\(version)", package]
+    proc.standardOutput = FileHandle.nullDevice
+    proc.standardError = FileHandle.nullDevice
+    try? proc.run()
+    proc.waitUntilExit()
+    return proc.terminationStatus == 0
+}
+
+func adwaitaFeatureDefines() -> [SwiftSetting] {
+    var defines: [SwiftSetting] = []
+    if pkgConfigAtLeast("libadwaita-1", "1.6") {
+        defines.append(.define("HAS_ADW_SPINNER"))
+    }
+    return defines
+}
+
 func findOnPath(_ name: String) -> String? {
     #if os(Windows)
     let separator: Character = ";"
@@ -179,7 +199,7 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
-            ],
+            ] + adwaitaFeatureDefines(),
             linkerSettings: lumaGtkLinkerSettings,
             plugins: [
                 .plugin(name: "EmbedLumaVersion"),

@@ -524,7 +524,11 @@ private final class TracerHookSearch {
 
     private let entry: Entry
     private let scopeDropdown: DropDown
+    #if HAS_ADW_SPINNER
     private let spinner: Adw.Spinner
+    #else
+    private let spinner: Gtk.Spinner
+    #endif
     private let statusRow: Box
     private let status: Label
     private let addAllButton: Button
@@ -624,7 +628,12 @@ private final class TracerHookSearch {
         scopeDropdown.tooltipText = "Target scope"
         queryRow.append(child: scopeDropdown)
 
+        #if HAS_ADW_SPINNER
         spinner = Adw.Spinner()
+        #else
+        spinner = Gtk.Spinner()
+        spinner.spinning = true
+        #endif
         spinner.visible = false
         spinner.valign = .center
         queryRow.append(child: spinner)
