@@ -1055,12 +1055,16 @@ public enum MissionTools {
             guard let dis = engine.disassembler(forSessionID: sessionID) else {
                 return errorResult("no disassembler for session", code: .notFound)
             }
+            guard engine.node(forSessionID: sessionID) != nil else {
+                return errorResult("no attached session for id \(sessionID)", code: .notFound)
+            }
             let page = await dis.disassemblePage(DisassemblyRequest(address: address, count: count, appearance: .light))
-            let text = page.lines.map { line in
-                let addr = String(format: "0x%llx", line.address)
-                let asm = line.asmText.plainText
-                let comment = line.commentText?.plainText ?? ""
-                return "\(addr)  \(asm)\(comment.isEmpty ? "" : "  \(comment)")"
+            let text: String = page.lines.map { (line: DisassemblyLine) -> String in
+                let addr: String = String(format: "0x%llx", line.address)
+                let asm: String = line.asmText.plainText
+                let comment: String = line.commentText?.plainText ?? ""
+                let suffix: String = comment.isEmpty ? "" : "  \(comment)"
+                return "\(addr)  \(asm)\(suffix)"
             }.joined(separator: "\n")
             let scopeLabel: String
             switch page.scope {
@@ -4057,6 +4061,10 @@ public enum MissionTools {
         summary: String
     ) -> ActionResult {
         let scrubbed = truncatingOversizedStrings(jsonObject, cap: stringValueByteCap)
+        guard JSONSerialization.isValidJSONObject(scrubbed) else {
+            let offender = describeNonJSONValue(scrubbed) ?? "unknown"
+            return errorResult("internal: tool produced non-JSON value (\(offender))")
+        }
         let data = (try? JSONSerialization.data(withJSONObject: scrubbed, options: [.sortedKeys])) ?? Data("{}".utf8)
         var json = String(data: data, encoding: .utf8) ?? "{}"
         if json.utf8.count > resultByteCap {
@@ -4064,6 +4072,27 @@ public enum MissionTools {
             json += "\n/* truncated — request a narrower view */"
         }
         return ActionResult(summary: summary, resultJSON: json, attachments: attachments)
+    }
+
+    private static func describeNonJSONValue(_ value: Any, path: String = "$") -> String? {
+        if let dict = value as? [String: Any] {
+            for (k, v) in dict {
+                if let hit = describeNonJSONValue(v, path: "\(path).\(k)") {
+                    return hit
+                }
+            }
+            return nil
+        }
+        if let arr = value as? [Any] {
+            for (i, v) in arr.enumerated() {
+                if let hit = describeNonJSONValue(v, path: "\(path)[\(i)]") {
+                    return hit
+                }
+            }
+            return nil
+        }
+        if JSONSerialization.isValidJSONObject([value]) { return nil }
+        return "\(path)=<\(type(of: value))>"
     }
 
     private static func truncatingOversizedStrings(_ value: Any, cap: Int) -> Any {
