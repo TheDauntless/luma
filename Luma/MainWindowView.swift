@@ -3,18 +3,19 @@ import SwiftUI
 import LumaCore
 
 struct MainWindowView: View {
+    @Binding private var document: LumaProject
     private let projectURL: URL
     private let fileURL: URL?
 
     @State private var engineResult: Result<Engine, any Swift.Error>
     @State private var picker = TargetPicker()
-    @State private var autosaver: ProjectAutosaver?
     @State private var collapsedEventBaselineVersion: Int = 0
     @State private var collapsedNewEvents: Int = 0
     @State private var isShowingHostingBlockedAlert = false
 
-    init(projectURL: URL, fileURL: URL? = nil) {
-        self.projectURL = projectURL
+    init(document: Binding<LumaProject>, fileURL: URL? = nil) {
+        self._document = document
+        self.projectURL = document.wrappedValue.workingProjectURL
         self.fileURL = fileURL
         let result: Result<Engine, any Swift.Error>
         do {
@@ -38,23 +39,11 @@ struct MainWindowView: View {
                 picker: picker,
                 projectURL: projectURL,
                 restorationPath: restorationPath,
-                autosaver: autosaver,
+                markDocumentEdited: { document.unsavedChangeCount &+= 1 },
                 collapsedEventBaselineVersion: $collapsedEventBaselineVersion,
                 collapsedNewEvents: $collapsedNewEvents,
                 isShowingHostingBlockedAlert: $isShowingHostingBlockedAlert
             )
-            .onChange(of: fileURL, initial: true) { _, newURL in
-                if let newURL {
-                    if autosaver?.destinationURL != newURL {
-                        autosaver = ProjectAutosaver(
-                            workingURL: projectURL,
-                            destinationURL: newURL
-                        )
-                    }
-                } else {
-                    autosaver = nil
-                }
-            }
         case .failure(let error):
             VStack(spacing: 12) {
                 Text("Failed to open project")
@@ -79,7 +68,7 @@ private struct ProjectContentView: View {
     let picker: TargetPicker
     let projectURL: URL
     let restorationPath: String
-    let autosaver: ProjectAutosaver?
+    let markDocumentEdited: () -> Void
 
     @Binding var collapsedEventBaselineVersion: Int
     @Binding var collapsedNewEvents: Int
@@ -139,9 +128,7 @@ private struct ProjectContentView: View {
         }
         .onDisappear {
             let url = projectURL
-            let autosaver = autosaver
             Task { @MainActor in
-                await autosaver?.flush()
                 await EngineRegistry.shared.release(workingProjectURL: url)
             }
         }
@@ -149,7 +136,7 @@ private struct ProjectContentView: View {
             guard let id = note.userInfo?["instanceID"] as? UUID,
                 id == engine.store.instanceID
             else { return }
-            autosaver?.scheduleSnapshot()
+            markDocumentEdited()
         }
         .onChange(of: engine.eventLog.totalReceived) { _, newVersion in
             if engine.projectUIState.isEventStreamCollapsed {
