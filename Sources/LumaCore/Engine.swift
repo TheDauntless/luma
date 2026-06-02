@@ -1791,6 +1791,7 @@ public final class Engine {
         try await compilerWorkspace.removePackage(package, paths: paths)
         cachedNodeModulesSnapshotFiles = nil
         editorFSSnapshotDirty = true
+        await recompileAttachedInstruments()
     }
 
     public func loadAllPackages(on node: ProcessNode) async {
@@ -1836,6 +1837,28 @@ public final class Engine {
         editorFSSnapshotDirty = true
         for node in processNodes {
             await loadPackage(package, on: node)
+        }
+        await recompileAttachedInstruments()
+    }
+
+    private func recompileAttachedInstruments() async {
+        for node in processNodes {
+            let attached = node.instruments.filter { $0.attachment == .attached }
+            guard !attached.isEmpty else { continue }
+            let instances = (try? store.fetchInstruments(sessionID: node.sessionID)) ?? []
+            for ref in attached {
+                guard let instance = instances.first(where: { $0.id == ref.id }) else { continue }
+                try? await node.disposeInstrumentOnAgent(instanceID: instance.id)
+                node.markInstrumentDetached(id: instance.id)
+                await loadInstrumentOnNode(
+                    instanceID: instance.id,
+                    kind: instance.kind,
+                    sourceIdentifier: instance.sourceIdentifier,
+                    configJSON: instance.configJSON,
+                    node: node,
+                    sessionID: node.sessionID
+                )
+            }
         }
     }
 
