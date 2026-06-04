@@ -4935,13 +4935,22 @@ public func deleteCustomInstrument(_ defID: UUID) async {
     private func handleDeviceOutput(device: Device, data: [UInt8], fd: Int, pid: UInt) {
         guard let node = processNodes.first(where: { $0.deviceID == device.id && $0.pid == pid }) else { return }
 
+        let message: String
+        if var text = String(bytes: data, encoding: .utf8) {
+            if text.hasSuffix("\r\n") {
+                text.removeLast(2)
+            } else if text.hasSuffix("\n") {
+                text.removeLast()
+            }
+            message = text
+        } else {
+            message = "(\(data.count) bytes on fd \(fd))"
+        }
+
         _events.yield(RuntimeEvent(
             sessionID: node.sessionID,
             source: .processOutput(fd: fd),
-            payload: .raw(
-                message: String(bytes: data, encoding: .utf8) ?? "(\(data.count) bytes on fd \(fd))",
-                data: data
-            ),
+            payload: .raw(message: message, data: data),
             data: data
         ))
     }
