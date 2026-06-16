@@ -214,25 +214,33 @@ if (Test-Path $adwaitaSrc) { Remove-Item -Recurse -Force $adwaitaSrc }
 # puts MSYS2's bin (with GNU tar) ahead on PATH for sed/awk, and
 # GNU tar reads the "D:" in a Windows path as a remote rcp host.
 Write-Host "[stage]   extracting Adwaita tarball"
-# Adwaita ships one relative symlink (folder-drag-accept-symbolic.svg
-# -> folder-symbolic.svg); creating a symlink on Windows needs a
-# privilege the runner lacks, and bsdtar stalls on it indefinitely.
-# Exclude it (the icon falls back to folder-symbolic anyway). Run via
-# Start-Process with a hard cap so a wedged extract can't hang the
-# build and tar's stderr can't deadlock the PowerShell pipe.
-$tarOut = [System.IO.Path]::GetTempFileName()
-$tarErr = [System.IO.Path]::GetTempFileName()
-$tarProc = Start-Process -FilePath "$env:SystemRoot\System32\tar.exe" `
-    -ArgumentList '-xJf', $adwaitaTar, '-C', $OutputDir, '--exclude', '*/folder-drag-accept-symbolic.svg' `
-    -NoNewWindow -PassThru -RedirectStandardOutput $tarOut -RedirectStandardError $tarErr
-if (-not $tarProc.WaitForExit(120000)) {
-    $tarProc.Kill()
+# bsdtar (System32\tar.exe) wedges extracting this tarball on the
+# hosted runner for hours, even with the lone symlink excluded — the
+# contents are unremarkable (1848 plain files), so it's a bsdtar/runner
+# quirk, not the data. Use 7-Zip instead: a separate implementation
+# that extracts symlinks as plain files and doesn't stall. Two passes,
+# since .tar.xz nests tar inside xz. Bound the inner extract so a
+# regression can't hang the build again.
+$sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Path
+if (-not $sevenZip) { $sevenZip = 'C:\Program Files\7-Zip\7z.exe' }
+if (-not (Test-Path $sevenZip)) { throw "7z.exe not found for Adwaita extraction" }
+
+& $sevenZip x $adwaitaTar "-o$OutputDir" -y -bso0 -bsp0
+if ($LASTEXITCODE -ne 0) { throw "Adwaita xz decompress failed ($LASTEXITCODE)" }
+$adwaitaInnerTar = Join-Path $OutputDir "adwaita-icon-theme-$adwaitaVersion.tar"
+
+$xErr = [System.IO.Path]::GetTempFileName()
+$xProc = Start-Process -FilePath $sevenZip `
+    -ArgumentList 'x', $adwaitaInnerTar, "-o$OutputDir", '-y', '-bso0', '-bsp0' `
+    -NoNewWindow -PassThru -RedirectStandardError $xErr
+if (-not $xProc.WaitForExit(120000)) {
+    $xProc.Kill()
     throw "Adwaita extraction hung (>120s)"
 }
-$tarExit = $tarProc.ExitCode
-Get-Content $tarErr -ErrorAction SilentlyContinue | Where-Object { $_ } | ForEach-Object { Write-Host "  tar: $_" }
-Remove-Item $tarOut, $tarErr -ErrorAction SilentlyContinue
-if ($tarExit -ne 0) { throw "Failed to extract $adwaitaTar (exit $tarExit)" }
+$xExit = $xProc.ExitCode
+Get-Content $xErr -ErrorAction SilentlyContinue | Where-Object { $_ } | ForEach-Object { Write-Host "  7z: $_" }
+Remove-Item $xErr, $adwaitaInnerTar -ErrorAction SilentlyContinue
+if ($xExit -ne 0) { throw "Adwaita tar extract failed (exit $xExit)" }
 $adwaitaDest = Join-Path $stage 'share\icons\Adwaita'
 New-Item -ItemType Directory -Force -Path $adwaitaDest | Out-Null
 Copy-Item (Join-Path $adwaitaSrc 'index.theme') $adwaitaDest
