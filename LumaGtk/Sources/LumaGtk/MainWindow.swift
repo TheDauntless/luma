@@ -16,6 +16,8 @@ final class MainWindow: InstrumentUIHost {
 
     private var engine: Engine?
     private var isClosing = false
+    private var isDirty = false
+    private var commitObserver: NSObjectProtocol?
 
     private let sessionsList: ListBox
     private let packagesList: ListBox
@@ -149,7 +151,7 @@ final class MainWindow: InstrumentUIHost {
         self.desktopNotifier = DesktopNotifier(app: app, window: window)
         self.window = window
         self.outerPaned = Paned(orientation: .horizontal)
-        window.title = MainWindow.makeTitle(for: document)
+        window.title = MainWindow.makeTitle(for: document, dirty: false)
         let state = LumaState.shared
         window.setDefaultSize(width: state.windowWidth, height: state.windowHeight)
         if state.windowMaximized {
@@ -311,11 +313,12 @@ final class MainWindow: InstrumentUIHost {
 
         let closeHandler: (Gtk.WindowRef) -> Bool = { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return false }
-                if self.isClosing { return false }
-                self.isClosing = true
-                self.persistWindowState()
-                self.application?.beginWindowClose(self)
+                guard let self, !self.isClosing else { return false }
+                if self.isDirty {
+                    self.confirmCloseWithUnsavedChanges()
+                } else {
+                    self.proceedWithClose(persist: false)
+                }
                 return true
             }
         }
@@ -372,23 +375,65 @@ final class MainWindow: InstrumentUIHost {
         showToast(summary, durationSeconds: duration)
     }
 
+    private func confirmCloseWithUnsavedChanges() {
+        UnsavedChangesDialog.present(
+            anchor: window,
+            message: "Save changes to \(document.displayName) before closing?",
+            onSave: { [weak self] in self?.saveThenClose() },
+            onDiscard: { [weak self] in self?.proceedWithClose(persist: false) }
+        )
+    }
+
+    private func saveThenClose() {
+        if document.isUntitled {
+            application?.presentSaveAsForClose(window: self)
+        } else {
+            proceedWithClose(persist: true)
+        }
+    }
+
+    func proceedWithClose(persist: Bool) {
+        guard !isClosing else { return }
+        isClosing = true
+        if let commitObserver {
+            NotificationCenter.default.removeObserver(commitObserver)
+        }
+        persistWindowState()
+        application?.beginWindowClose(self, persist: persist)
+    }
+
+    func documentDidSave() {
+        isDirty = false
+        refreshTitle()
+        showToast("Saved")
+    }
+
     func documentDidChange() {
         if let updated = application?.documentForWindow(self) {
             self.document = updated
         }
-        window.title = MainWindow.makeTitle(for: document)
+        isDirty = false
+        refreshTitle()
         showToast("Saved as \(document.displayName).luma")
+    }
+
+    private func markDirty() {
+        guard !isDirty else { return }
+        isDirty = true
+        refreshTitle()
+    }
+
+    private func refreshTitle() {
+        window.title = MainWindow.makeTitle(for: document, dirty: isDirty)
     }
 
     func destroyWindow() {
         window.destroy()
     }
 
-    private static func makeTitle(for document: LumaDocument) -> String {
-        if document.isUntitled {
-            return "Luma — ● \(document.displayName)"
-        }
-        return "Luma — \(document.displayName)"
+    private static func makeTitle(for document: LumaDocument, dirty: Bool) -> String {
+        let prefix = dirty ? "● " : ""
+        return "Luma — \(prefix)\(document.displayName)"
     }
 
     private func handlePendingActionsChange(_ rows: [MissionAction]) {
@@ -453,6 +498,7 @@ final class MainWindow: InstrumentUIHost {
     func attach(engine: Engine) {
         self.engine = engine
         actionQueuePopover.attach(engine: engine)
+        observeProjectCommits(storeInstanceID: engine.store.instanceID)
 
         eventStreamPane.setInitialCollapsed(engine.projectUIState.isEventStreamCollapsed)
         applyEventStreamLayout()
@@ -535,6 +581,17 @@ final class MainWindow: InstrumentUIHost {
         notebookPane = NotebookPane(engine: engine)
         if case .notebook = selection {
             renderDetail()
+        }
+    }
+
+    private func observeProjectCommits(storeInstanceID: UUID) {
+        commitObserver = NotificationCenter.default.addObserver(
+            forName: ProjectStore.didCommitNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard note.userInfo?["instanceID"] as? UUID == storeInstanceID else { return }
+            MainActor.assumeIsolated { self?.markDirty() }
         }
     }
 

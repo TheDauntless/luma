@@ -186,7 +186,7 @@ final class LumaApplication {
         }
     }
 
-    func beginWindowClose(_ window: MainWindow) {
+    func beginWindowClose(_ window: MainWindow, persist: Bool) {
         let key = ObjectIdentifier(window)
         guard let entry = openDocuments.removeValue(forKey: key) else {
             window.destroyWindow()
@@ -194,12 +194,29 @@ final class LumaApplication {
         }
         app.hold()
         Task { @MainActor in
-            await persistAndShutDown(entry)
+            await persistAndShutDown(entry, persist: persist)
             window.destroyWindow()
             app.release()
             if openDocuments.isEmpty && activeWelcome == nil {
                 showWelcome()
             }
+        }
+    }
+
+    func save(window: MainWindow) {
+        let key = ObjectIdentifier(window)
+        guard let entry = openDocuments[key] else { return }
+        if entry.document.isUntitled {
+            presentSaveAsDialog(for: window, closeAfterSave: false)
+            return
+        }
+        do {
+            try Self.writeSnapshot(workingURL: entry.workingURL, to: entry.document.url)
+            window.documentDidSave()
+        } catch {
+            FileHandle.standardError.write(
+                "Save failed: \(error)\n".data(using: .utf8)!
+            )
         }
     }
 
@@ -268,12 +285,14 @@ final class LumaApplication {
         }
     }
 
-    private func persistAndShutDown(_ entry: OpenDocument) async {
+    private func persistAndShutDown(_ entry: OpenDocument, persist: Bool) async {
         await entry.engine.shutdown()
         let workingURL = entry.workingURL
         let destination = entry.document.url
         await Task.detached(priority: .userInitiated) {
-            try? Self.writeSnapshot(workingURL: workingURL, to: destination)
+            if persist {
+                try? Self.writeSnapshot(workingURL: workingURL, to: destination)
+            }
             try? FileManager.default.removeItem(at: workingURL)
         }.value
     }
@@ -327,7 +346,7 @@ final class LumaApplication {
         guard let parentPtr = active.window.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
         let context = Unmanaged.passRetained(self).toOpaque()
         "Open Project".withCString { title in
-            luma_file_dialog_open(parentPtr, title, lumaOpenPathThunk, context)
+            luma_folder_dialog_select(parentPtr, title, lumaOpenPathThunk, context)
         }
     }
 
@@ -335,15 +354,25 @@ final class LumaApplication {
         guard let parentPtr = parent.window.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
         let context = Unmanaged.passRetained(WelcomeOpenContext(welcome: parent)).toOpaque()
         "Open Project".withCString { title in
-            luma_file_dialog_open(parentPtr, title, lumaWelcomeOpenPathThunk, context)
+            luma_folder_dialog_select(parentPtr, title, lumaWelcomeOpenPathThunk, context)
         }
     }
 
     fileprivate func presentSaveAsDialog() {
         guard let active = activeWindow() else { return }
-        guard let parentPtr = active.window.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
-        let suggested = "\(active.document.displayName).\(LumaDocumentLoader.fileExtension)"
-        let context = Unmanaged.passRetained(SaveAsContext(app: self, window: active)).toOpaque()
+        presentSaveAsDialog(for: active, closeAfterSave: false)
+    }
+
+    func presentSaveAsForClose(window: MainWindow) {
+        presentSaveAsDialog(for: window, closeAfterSave: true)
+    }
+
+    private func presentSaveAsDialog(for window: MainWindow, closeAfterSave: Bool) {
+        guard let parentPtr = window.window.window_ptr.map(UnsafeMutableRawPointer.init) else { return }
+        let suggested = "\(window.document.displayName).\(LumaDocumentLoader.fileExtension)"
+        let context = Unmanaged.passRetained(
+            SaveAsContext(app: self, window: window, closeAfterSave: closeAfterSave)
+        ).toOpaque()
         "Save Project As".withCString { title in
             suggested.withCString { name in
                 luma_file_dialog_save(parentPtr, title, name, lumaSavePathThunk, context)
@@ -362,6 +391,10 @@ final class LumaApplication {
         }
         installAction(appPtr: appPtr, name: "open") { [weak self] in
             self?.presentOpenDialog()
+        }
+        installAction(appPtr: appPtr, name: "save") { [weak self] in
+            guard let self, let active = self.activeWindow() else { return }
+            self.save(window: active)
         }
         installAction(appPtr: appPtr, name: "save-as") { [weak self] in
             self?.presentSaveAsDialog()
@@ -447,6 +480,7 @@ final class LumaApplication {
         luma_menu_unref(topSection)
 
         let docSection = luma_menu_new()!
+        appendItem(toMenu: docSection, label: "Save", action: "app.save")
         appendItem(toMenu: docSection, label: "Save As\u{2026}", action: "app.save-as")
         luma_menu_append_section(menu, docSection)
         luma_menu_unref(docSection)
@@ -557,6 +591,7 @@ final class LumaApplication {
         ShortcutGroup(title: "General", items: [
             ShortcutEntry(title: "New Window", action: "app.new-window", accel: "<Primary>n"),
             ShortcutEntry(title: "Open Project\u{2026}", action: "app.open", accel: "<Primary>o"),
+            ShortcutEntry(title: "Save", action: "app.save", accel: "<Primary>s"),
             ShortcutEntry(title: "Save As\u{2026}", action: "app.save-as", accel: "<Primary><Shift>s"),
             ShortcutEntry(title: "Close Window", action: "app.close-window", accel: "<Primary>w"),
             ShortcutEntry(title: "Keyboard Shortcuts", action: "app.show-help-overlay", accel: "<Primary>question"),
@@ -640,9 +675,11 @@ private final class ActionHandlerBox {
 private final class SaveAsContext {
     let app: LumaApplication
     let window: MainWindow
-    init(app: LumaApplication, window: MainWindow) {
+    let closeAfterSave: Bool
+    init(app: LumaApplication, window: MainWindow, closeAfterSave: Bool) {
         self.app = app
         self.window = window
+        self.closeAfterSave = closeAfterSave
     }
 }
 
@@ -703,6 +740,9 @@ private let lumaSavePathThunk: @convention(c) (
         let ctx = Unmanaged<SaveAsContext>.fromOpaque(ptr).takeRetainedValue()
         if let pathString {
             ctx.app.handleSaveAsPath(window: ctx.window, pathString)
+            if ctx.closeAfterSave {
+                ctx.window.proceedWithClose(persist: false)
+            }
         }
     }
 }
