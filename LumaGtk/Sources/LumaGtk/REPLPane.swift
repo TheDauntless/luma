@@ -209,14 +209,20 @@ final class REPLPane {
             let bar = Box(orientation: .horizontal, spacing: 8)
             bar.marginTop = 6
             bar.marginBottom = 6
-            let separator = Separator(orientation: .horizontal)
-            separator.hexpand = true
-            separator.valign = .center
-            let label = Label(str: cell.code)
+            let leadingSeparator = Separator(orientation: .horizontal)
+            leadingSeparator.hexpand = true
+            leadingSeparator.valign = .center
+            let time = DateFormatter.localizedString(
+                from: cell.timestamp, dateStyle: .none, timeStyle: .short)
+            let label = Label(str: "\(cell.code) at \(time)")
             label.add(cssClass: "dim-label")
             label.add(cssClass: "caption")
-            bar.append(child: separator)
+            let trailingSeparator = Separator(orientation: .horizontal)
+            trailingSeparator.hexpand = true
+            trailingSeparator.valign = .center
+            bar.append(child: leadingSeparator)
             bar.append(child: label)
+            bar.append(child: trailingSeparator)
             return bar
         }
 
