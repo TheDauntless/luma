@@ -24,6 +24,22 @@ public struct AddressContext: Sendable, Hashable {
     }
 }
 
+public struct AddressFacts: Sendable, Hashable {
+    public enum Mapping: Sendable, Hashable {
+        case unmapped
+        case data
+        case executable
+    }
+
+    public var mapping: Mapping
+    public var isFunctionStart: Bool
+
+    public init(mapping: Mapping, isFunctionStart: Bool = false) {
+        self.mapping = mapping
+        self.isFunctionStart = isFunctionStart
+    }
+}
+
 public struct AddressAction: Identifiable, Sendable {
     public enum Role: Sendable {
         case normal
@@ -54,5 +70,6 @@ public struct AddressAction: Identifiable, Sendable {
 public typealias AddressActionProvider = @MainActor @Sendable (
     _ sessionID: UUID,
     _ address: UInt64,
-    _ context: AddressContext
+    _ context: AddressContext,
+    _ facts: AddressFacts
 ) -> [AddressAction]

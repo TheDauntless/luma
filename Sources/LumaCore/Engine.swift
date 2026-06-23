@@ -90,6 +90,11 @@ public final class Engine {
     @ObservationIgnored private var cachedNodeModulesSnapshotFiles: [EditorFSSnapshotFile]?
 
     private var addressActionProviders: [AddressActionProvider] = []
+    private var protectionRegionsBySession: [UUID: [ProtectionRegion]] = [:]
+    private var unmappedPagesBySession: [UUID: Set<UInt64>] = [:]
+    private var mappingProbesBySession: [UUID: [UInt64: Task<AddressFacts.Mapping, Never>]] = [:]
+    private var functionStartsBySession: [UUID: [UInt64: Bool]] = [:]
+    private var factsIdentityBySession: [UUID: String] = [:]
     private var runningCustomInstrumentReloads: Set<UUID> = []
     private var pendingCustomInstrumentReloads: Set<UUID> = []
     private var customInstrumentReloadWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
@@ -185,8 +190,8 @@ public final class Engine {
             self?.handleMissionLiveEvent(missionID: missionID, event: event)
         }
 
-        registerAddressActionProvider { [weak self] sessionID, address, context in
-            self?.tracerAddressActions(sessionID: sessionID, address: address, context: context) ?? []
+        registerAddressActionProvider { [weak self] sessionID, address, context, facts in
+            self?.tracerAddressActions(sessionID: sessionID, address: address, context: context, facts: facts) ?? []
         }
 
         registerThreadActionProvider { [weak self] sessionID, thread in
@@ -2114,6 +2119,7 @@ public final class Engine {
 
             if let info = await node.fetchProcessInfo() {
                 let mainModule = node.mainModule
+                invalidateAddressFacts(sessionID: s.id, identity: info.identity)
                 try? store.deleteMemoryPagesAnon(sessionID: s.id, exceptIdentity: info.identity)
                 let storedInfo = ProcessSession.ProcessInfo(
                     platform: info.platform,
@@ -3477,15 +3483,17 @@ public final class Engine {
     public func addressActions(
         sessionID: UUID,
         address: UInt64,
-        context: AddressContext = AddressContext()
+        context: AddressContext = AddressContext(),
+        facts: AddressFacts
     ) -> [AddressAction] {
-        addressActionProviders.flatMap { $0(sessionID, address, context) }
+        addressActionProviders.flatMap { $0(sessionID, address, context, facts) }
     }
 
     private func tracerAddressActions(
         sessionID: UUID,
         address: UInt64,
-        context: AddressContext
+        context: AddressContext,
+        facts: AddressFacts
     ) -> [AddressAction] {
         if let tracerID = tracerInstanceIDBySession[sessionID],
             let hookID = addressAnnotations[sessionID]?[address]?.tracerHookID
@@ -3501,34 +3509,147 @@ public final class Engine {
             ]
         }
 
-        if context.kind == .data {
+        guard facts.mapping == .executable else {
             return []
         }
 
-        let hookKind: TracerHookKind = (context.kind == .function) ? .function : .instruction
-        let title = (hookKind == .function) ? "Add Function Hook\u{2026}" : "Add Instruction Hook\u{2026}"
-        let preferredAnchor = context.anchorHint
-        return [
-            AddressAction(
-                title: title,
-                systemImage: "pin",
-                perform: { [weak self] in
-                    guard let self,
-                        let result = await self.addTracerHook(
-                            sessionID: sessionID,
-                            address: address,
-                            kind: hookKind,
-                            preferredAnchor: preferredAnchor
-                        )
-                    else { return nil }
-                    return .instrumentComponent(
+        var actions: [AddressAction] = []
+        if facts.isFunctionStart {
+            actions.append(tracerHookAction(sessionID: sessionID, address: address, kind: .function, title: "Add Function Hook\u{2026}", anchor: context.anchorHint))
+        }
+        actions.append(tracerHookAction(sessionID: sessionID, address: address, kind: .instruction, title: "Add Instruction Hook\u{2026}", anchor: context.anchorHint))
+        return actions
+    }
+
+    private func tracerHookAction(
+        sessionID: UUID,
+        address: UInt64,
+        kind: TracerHookKind,
+        title: String,
+        anchor: AddressAnchor?
+    ) -> AddressAction {
+        AddressAction(
+            title: title,
+            systemImage: kind == .function ? "f.cursive" : "i.square",
+            perform: { [weak self] in
+                guard let self,
+                    let result = await self.addTracerHook(
                         sessionID: sessionID,
-                        instrumentID: result.instrumentID,
-                        componentID: result.hookID
+                        address: address,
+                        kind: kind,
+                        preferredAnchor: anchor
                     )
-                }
-            )
-        ]
+                else { return nil }
+                return .instrumentComponent(
+                    sessionID: sessionID,
+                    instrumentID: result.instrumentID,
+                    componentID: result.hookID
+                )
+            }
+        )
+    }
+
+    // MARK: - Address Facts
+
+    private struct ProtectionRegion {
+        let range: Range<UInt64>
+        let executable: Bool
+    }
+
+    private static let protectionPageMask: UInt64 = 0xfff
+
+    public func addressFacts(
+        sessionID: UUID,
+        address: UInt64,
+        context: AddressContext = AddressContext()
+    ) async -> AddressFacts {
+        switch context.kind {
+        case .function:
+            return AddressFacts(mapping: .executable, isFunctionStart: true)
+        case .data:
+            return AddressFacts(mapping: .data)
+        case .code:
+            guard node(forSessionID: sessionID) != nil else {
+                return AddressFacts(mapping: .executable)
+            }
+            return AddressFacts(mapping: .executable, isFunctionStart: await resolveFunctionStart(sessionID: sessionID, address: address))
+        case .unspecified:
+            break
+        }
+
+        guard node(forSessionID: sessionID) != nil else {
+            return AddressFacts(mapping: .unmapped)
+        }
+        let mapping = await resolveMapping(sessionID: sessionID, address: address)
+        guard mapping == .executable else {
+            return AddressFacts(mapping: mapping)
+        }
+        let isFunctionStart = await resolveFunctionStart(sessionID: sessionID, address: address)
+        return AddressFacts(mapping: .executable, isFunctionStart: isFunctionStart)
+    }
+
+    private func resolveMapping(sessionID: UUID, address: UInt64) async -> AddressFacts.Mapping {
+        if let cached = cachedMapping(sessionID: sessionID, address: address) {
+            return cached
+        }
+        let pageBase = address & ~Self.protectionPageMask
+        if let inFlight = mappingProbesBySession[sessionID]?[pageBase] {
+            return await inFlight.value
+        }
+        let probe = Task { [weak self] () -> AddressFacts.Mapping in
+            await self?.fetchMapping(sessionID: sessionID, address: address, pageBase: pageBase) ?? .unmapped
+        }
+        mappingProbesBySession[sessionID, default: [:]][pageBase] = probe
+        let mapping = await probe.value
+        mappingProbesBySession[sessionID]?[pageBase] = nil
+        return mapping
+    }
+
+    private func cachedMapping(sessionID: UUID, address: UInt64) -> AddressFacts.Mapping? {
+        if let region = protectionRegionsBySession[sessionID]?.first(where: { $0.range.contains(address) }) {
+            return region.executable ? .executable : .data
+        }
+        let pageBase = address & ~Self.protectionPageMask
+        if unmappedPagesBySession[sessionID]?.contains(pageBase) == true {
+            return .unmapped
+        }
+        return nil
+    }
+
+    private func fetchMapping(sessionID: UUID, address: UInt64, pageBase: UInt64) async -> AddressFacts.Mapping {
+        if let cached = cachedMapping(sessionID: sessionID, address: address) {
+            return cached
+        }
+        guard let node = node(forSessionID: sessionID) else {
+            return .unmapped
+        }
+        guard let range = try? await node.findRangeByAddress(address) else {
+            unmappedPagesBySession[sessionID, default: []].insert(pageBase)
+            return .unmapped
+        }
+        let executable = range.protection.contains("x")
+        protectionRegionsBySession[sessionID, default: []].append(
+            ProtectionRegion(range: range.base..<(range.base &+ range.size), executable: executable))
+        return executable ? .executable : .data
+    }
+
+    private func invalidateAddressFacts(sessionID: UUID, identity: String) {
+        guard factsIdentityBySession[sessionID] != identity else { return }
+        factsIdentityBySession[sessionID] = identity
+        protectionRegionsBySession[sessionID] = nil
+        unmappedPagesBySession[sessionID] = nil
+        functionStartsBySession[sessionID] = nil
+        mappingProbesBySession[sessionID] = nil
+    }
+
+    private func resolveFunctionStart(sessionID: UUID, address: UInt64) async -> Bool {
+        if let cached = functionStartsBySession[sessionID]?[address] {
+            return cached
+        }
+        guard let disassembler = disassembler(forSessionID: sessionID) else { return false }
+        let isFunctionStart = await disassembler.findFunctionStart(containing: address) == address
+        functionStartsBySession[sessionID, default: [:]][address] = isFunctionStart
+        return isFunctionStart
     }
 
     private func threadTraceActions(sessionID: UUID, thread: ProcessThread) -> [ThreadAction] {
