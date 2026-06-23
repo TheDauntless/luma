@@ -4764,6 +4764,9 @@ public func deleteCustomInstrument(_ defID: UUID) async {
         if let match = existing.first(where: { $0.kind == kind && $0.anchor == anchor }) {
             return match
         }
+        if let match = existing.first(where: { $0.kind == kind && $0.lastResolvedAddress == pointer }) {
+            return match
+        }
 
         var insight = AddressInsight(
             sessionID: sessionID,
