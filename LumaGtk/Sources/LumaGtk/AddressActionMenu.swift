@@ -1,8 +1,26 @@
+import CGraphene
 import CGtk
 import Foundation
 import Gdk
+import struct Graphene.PointRef
 import Gtk
 import LumaCore
+
+private func computePoint<Src: WidgetProtocol, Dst: WidgetProtocol>(
+    x: Double,
+    y: Double,
+    from src: Src,
+    to dst: Dst
+) -> (x: Double, y: Double) {
+    var source = graphene_point_t(x: Float(x), y: Float(y))
+    var destination = graphene_point_t(x: 0, y: 0)
+    _ = withUnsafeMutablePointer(to: &source) { srcPtr in
+        withUnsafeMutablePointer(to: &destination) { dstPtr in
+            src.computePoint(target: dst, point: PointRef(srcPtr), outPoint: PointRef(dstPtr))
+        }
+    }
+    return (Double(destination.x), Double(destination.y))
+}
 
 @MainActor
 enum AddressActionMenu {
@@ -16,6 +34,8 @@ enum AddressActionMenu {
         sessionID: UUID,
         address: UInt64,
         value: String,
+        copyLabel: String = "Copy",
+        includeDisassembly: Bool = true,
         context: AddressContext = AddressContext()
     ) {
         let gesture = GestureClick()
@@ -23,7 +43,7 @@ enum AddressActionMenu {
         gesture.propagationPhase = GTK_PHASE_CAPTURE
         gesture.onPressed { [anchor] _, _, x, y in
             MainActor.assumeIsolated {
-                present(at: anchor, x: x, y: y, engine: engine, sessionID: sessionID, address: address, value: value, context: context)
+                present(at: anchor, x: x, y: y, engine: engine, sessionID: sessionID, address: address, value: value, copyLabel: copyLabel, includeDisassembly: includeDisassembly, context: context)
             }
         }
         anchor.install(controller: gesture)
@@ -37,35 +57,42 @@ enum AddressActionMenu {
         sessionID: UUID,
         address: UInt64,
         value: String,
+        copyLabel: String = "Copy",
+        includeDisassembly: Bool = true,
         context: AddressContext = AddressContext(),
         extraSections: [[ContextMenu.Item]] = []
     ) {
+        guard let rootPtr = anchor.root?.ptr else { return }
+        let root = WidgetRef(raw: rootPtr)
+        let point = computePoint(x: x, y: y, from: anchor, to: root)
         Task { @MainActor in
             let facts = await engine.addressFacts(sessionID: sessionID, address: address, context: context)
             presentResolved(
-                at: anchor, x: x, y: y, engine: engine, sessionID: sessionID,
-                address: address, value: value, context: context, facts: facts, extraSections: extraSections)
+                at: root, x: point.x, y: point.y, engine: engine, sessionID: sessionID,
+                address: address, value: value, copyLabel: copyLabel, includeDisassembly: includeDisassembly, context: context, facts: facts, extraSections: extraSections)
         }
     }
 
     private static func presentResolved(
-        at anchor: Widget,
+        at anchor: some WidgetProtocol,
         x: Double,
         y: Double,
         engine: Engine,
         sessionID: UUID,
         address: UInt64,
         value: String,
+        copyLabel: String,
+        includeDisassembly: Bool,
         context: AddressContext,
         facts: AddressFacts,
         extraSections: [[ContextMenu.Item]]
     ) {
         let copySection: [ContextMenu.Item] = [
-            .init("Copy") { copyToClipboard(value) }
+            .init(copyLabel) { copyToClipboard(value) }
         ]
 
         var inspectSection: [ContextMenu.Item] = []
-        if facts.mapping == .executable {
+        if includeDisassembly, facts.mapping == .executable {
             inspectSection.append(.init("Open Disassembly") {
                 openInsight(engine: engine, sessionID: sessionID, address: address, kind: .disassembly, preferredAnchor: context.anchorHint, failureLabel: "Can\u{2019}t open disassembly")
             })

@@ -334,6 +334,19 @@ enum StyleSheet {
         padding-left: 0;
     }
 
+    .luma-context-menu button.luma-menu-item {
+        padding: 7px 14px;
+        min-height: 0;
+        font-weight: normal;
+        border-radius: 6px;
+        margin: 1px 0;
+    }
+    .luma-context-menu separator {
+        margin: 4px 6px;
+        min-height: 1px;
+        background-color: alpha(@theme_fg_color, 0.12);
+    }
+
     button.luma-notebook-fab {
         min-height: 0;
         padding: 6px 18px;
