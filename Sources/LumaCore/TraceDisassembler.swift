@@ -38,6 +38,26 @@ public final class TraceDisassembler {
         return StyledText.parseAnsi(raw)
     }
 
+    public func instructionAddresses(at address: UInt64, size: Int) async -> [UInt64] {
+        await ensureOpened()
+        let raw = await r2.cmd("pDj \(size) @ 0x\(String(address, radix: 16))")
+        guard let data = raw.data(using: .utf8),
+            let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+        return array.compactMap { parseInstructionAddress($0["addr"]) }
+    }
+
+    private func parseInstructionAddress(_ value: Any?) -> UInt64? {
+        if let number = value as? NSNumber {
+            return number.uint64Value
+        }
+        if let string = value as? String {
+            let trimmed = string.hasPrefix("0x") ? String(string.dropFirst(2)) : string
+            return UInt64(trimmed, radix: 16)
+        }
+        return nil
+    }
+
     private func ensureOpened() async {
         if let openTask {
             await openTask.value
