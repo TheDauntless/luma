@@ -299,8 +299,8 @@ struct TracerConfigView: View {
 
     private var heroSubtitle: String {
         config.hooks.isEmpty
-            ? "Search for functions in the attached process and add them as hooks."
-            : "Search for more functions to add, or select an existing hook to edit it."
+            ? "Search for a function to start tracing it."
+            : "Search for another function to trace, or select a hook to edit it."
     }
 
     private var hookLayout: some View {

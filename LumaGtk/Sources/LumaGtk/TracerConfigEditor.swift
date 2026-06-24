@@ -593,8 +593,8 @@ private final class TracerHookSearch {
             hero.append(child: title)
 
             let subtitleLabel = Label(str: hasExistingHooks
-                ? "Search for more functions to add, or select an existing hook to edit it."
-                : "Search for functions in the attached process and add them as hooks.")
+                ? "Search for another function to trace, or select a hook to edit it."
+                : "Search for a function to start tracing it.")
             subtitleLabel.add(cssClass: "dim-label")
             subtitleLabel.wrap = true
             subtitleLabel.justify = .center
