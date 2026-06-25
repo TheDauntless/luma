@@ -143,11 +143,14 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
         }
 
         private func handle(url: URL) {
-            guard url.scheme == "luma", url.host == "join" else {
+            if let labID = BackendConfig.labID(fromInviteLink: url) {
+                CollaborationJoinQueue.shared.enqueue(labID: labID)
                 return
             }
 
-            guard let labID = labID(from: url) else {
+            guard url.scheme == "luma", url.host == "join",
+                let labID = labID(from: url)
+            else {
                 return
             }
 
@@ -218,8 +221,13 @@ func sharedGitHubAuth() -> GitHubAuth { sharedWelcomeModel.gitHubAuth }
         }
 
         static func handle(url: URL) {
-            guard url.scheme == "luma", url.host == "join" else { return }
-            guard let labID = labID(from: url) else { return }
+            if let labID = BackendConfig.labID(fromInviteLink: url) {
+                CollaborationJoinQueue.shared.enqueue(labID: labID)
+                return
+            }
+            guard url.scheme == "luma", url.host == "join",
+                let labID = labID(from: url)
+            else { return }
             CollaborationJoinQueue.shared.enqueue(labID: labID)
         }
 

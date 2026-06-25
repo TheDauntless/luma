@@ -48,6 +48,11 @@ struct PhoneRootView: View {
             await welcome.bootstrap()
         }
         .onOpenURL(perform: handleIncomingURL)
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            if let url = activity.webpageURL {
+                handleIncomingURL(url)
+            }
+        }
         .fileImporter(
             isPresented: $isShowingOpenPicker,
             allowedContentTypes: [UTType(exportedAs: Self.lumaUTI)]
@@ -92,8 +97,22 @@ struct PhoneRootView: View {
             LumaAppDelegate.handle(url: url)
             return
         }
+        if let labID = BackendConfig.labID(fromInviteLink: url) {
+            joinLab(labID: labID)
+            return
+        }
         guard url.isFileURL else { return }
         importExternal(url)
+    }
+
+    @MainActor
+    private func joinLab(labID: String) {
+        CollaborationJoinQueue.shared.enqueue(labID: labID)
+        guard dbURL == nil else { return }
+        let url = Self.untitledURL(named: "Shared Lab")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        dbURL = url
+        LumaAppState.shared.lastDocumentPath = url.path
     }
 
     @MainActor

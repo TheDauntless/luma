@@ -344,19 +344,25 @@ final class LumaApplication {
     }
 
     fileprivate func handleCollaborationURL(_ urlString: String) {
-        guard let url = URL(string: urlString),
-            url.scheme == "luma",
-            url.host == "join",
-            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-            let labID = components.queryItems?.first(where: { $0.name == "lab" })?.value,
-            !labID.isEmpty
-        else { return }
+        guard let url = URL(string: urlString), let labID = labID(fromURL: url) else { return }
         if let existing = openDocuments.values.first {
             existing.engine.startCollaboration(joiningLab: labID)
             return
         }
         CollaborationJoinQueue.shared.enqueue(labID: labID)
         openNewUntitledWindow()
+    }
+
+    private func labID(fromURL url: URL) -> String? {
+        if let labID = BackendConfig.labID(fromInviteLink: url) {
+            return labID
+        }
+        guard url.scheme == "luma", url.host == "join",
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            let labID = components.queryItems?.first(where: { $0.name == "lab" })?.value,
+            !labID.isEmpty
+        else { return nil }
+        return labID
     }
 
     fileprivate func handleSaveAsPath(window: MainWindow, _ path: String) {
@@ -782,7 +788,7 @@ private let lumaOpenFilesThunk: @convention(c) (
     MainActor.assumeIsolated {
         let ptr = UnsafeMutableRawPointer(bitPattern: raw)!
         let app = Unmanaged<LumaApplication>.fromOpaque(ptr).takeUnretainedValue()
-        if str.hasPrefix("luma://") {
+        if str.hasPrefix("luma://") || str.hasPrefix(BackendConfig.inviteLinkBase) {
             app.handleCollaborationURL(str)
         } else {
             app.openWindow(forFile: URL(fileURLWithPath: str))
