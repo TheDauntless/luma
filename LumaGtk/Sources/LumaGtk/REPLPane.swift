@@ -296,7 +296,7 @@ final class REPLPane {
         let column = Box(orientation: .vertical, spacing: 2)
         column.hexpand = true
 
-        let codeRow = Box(orientation: .horizontal, spacing: 8)
+        let codeRow = Box(orientation: .horizontal, spacing: 6)
         let prompt = Label(str: "")
         prompt.add(cssClass: "monospace")
         prompt.useMarkup = true
@@ -318,6 +318,14 @@ final class REPLPane {
         codeScroll.valign = .start
         codeScroll.set(child: codeLabel)
         codeRow.append(child: codeScroll)
+        let timeLabel = Label(str: DateFormatter.localizedString(
+            from: cell.timestamp, dateStyle: .none, timeStyle: .short))
+        timeLabel.add(cssClass: "caption")
+        timeLabel.add(cssClass: "dim-label")
+        timeLabel.valign = .start
+        timeLabel.tooltipText = DateFormatter.localizedString(
+            from: cell.timestamp, dateStyle: .medium, timeStyle: .medium)
+        codeRow.append(child: timeLabel)
         column.append(child: codeRow)
 
         if !Self.isResultEmpty(cell.result) {
