@@ -582,14 +582,19 @@ private struct REPLInputField: View {
             field.isAutomaticTextCompletionEnabled = true
             field.suggestionsDelegate = context.coordinator
 
+            field.stringValue = text
+
             context.coordinator.textField = field
             return field
         }
 
         func updateNSView(_ nsView: NSTextField, context: Context) {
-            if nsView.stringValue != text {
-                nsView.stringValue = text
-                moveInsertionToEnd(of: nsView)
+            if text != context.coordinator.lastSyncedText {
+                context.coordinator.lastSyncedText = text
+                if nsView.stringValue != text {
+                    nsView.stringValue = text
+                    moveInsertionToEnd(of: nsView)
+                }
             }
 
             if isFocused,
@@ -615,13 +620,16 @@ private struct REPLInputField: View {
 
             var completionBaseText: String?
             var completionBaseCursor: Int?
+            var lastSyncedText: String
 
             init(_ parent: REPLInputFieldAppKit) {
                 self.parent = parent
+                self.lastSyncedText = parent.text
             }
 
             func controlTextDidChange(_ obj: Notification) {
                 guard let field = textField else { return }
+                lastSyncedText = field.stringValue
                 parent.text = field.stringValue
             }
 
@@ -641,6 +649,7 @@ private struct REPLInputField: View {
                     let current = textView.string
                     parent.onCommit(current)
 
+                    lastSyncedText = ""
                     parent.text = ""
                     textField?.stringValue = ""
 
@@ -722,6 +731,10 @@ private struct REPLInputField: View {
             }
 
             func textField(_ textField: NSTextField, textCompletionFor item: Item) -> String? {
+                completedText(for: item)
+            }
+
+            private func completedText(for item: Item) -> String? {
                 guard let baseText = completionBaseText,
                     let baseCursor = completionBaseCursor
                 else {
@@ -777,18 +790,21 @@ private struct REPLInputField: View {
             }
 
             func textField(_ textField: NSTextField, didSelect item: Item) {
+                let completed = completedText(for: item) ?? item.representedValue
+
                 guard let editor = textField.currentEditor() else {
-                    parent.text = textField.stringValue
+                    lastSyncedText = completed
+                    parent.text = completed
                     parent.isFocused = true
                     return
                 }
 
-                let selection = editor.selectedRange
-                let end = selection.location + selection.length
-
+                editor.string = completed
+                let end = (completed as NSString).length
                 editor.selectedRange = NSRange(location: end, length: 0)
 
-                parent.text = editor.string
+                lastSyncedText = completed
+                parent.text = completed
             }
         }
     }
