@@ -1246,8 +1246,8 @@ public final class Engine {
     }
 
     public func localUserHosts(_ session: ProcessSession) -> Bool {
-        guard let host = session.host else { return true }
-        return host.id == collaboration.localUser?.id
+        guard let host = session.host, let localID = localUserID else { return true }
+        return host.id == localID
     }
 
     public func isHostingNode(_ sessionID: UUID) -> Bool {
@@ -2457,6 +2457,10 @@ public final class Engine {
               let sessionID = event.sessionID
         else { return nil }
         return instrument(id: id, sessionID: sessionID)
+    }
+
+    public var localUserID: String? {
+        collaboration.localUser?.id ?? gitHubAuth.currentUser?.id
     }
 
     public func driver(forSessionID id: UUID) -> CollaborationSession.UserInfo? {

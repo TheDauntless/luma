@@ -269,8 +269,7 @@ struct SessionDetachedBanner: View {
     }
 
     private var localUserOwnsHost: Bool {
-        guard let host = session.host else { return true }
-        return host.id == engine.collaboration.localUser?.id
+        engine.localUserHosts(session)
     }
 
     private var canAct: Bool {

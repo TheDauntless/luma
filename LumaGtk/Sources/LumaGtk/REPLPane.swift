@@ -84,7 +84,7 @@ final class REPLPane {
         guard let session else { return false }
         if engine.node(forSessionID: sessionID) != nil { return true }
         if let host = session.host,
-           host.id != engine.collaboration.localUser?.id,
+           host.id != engine.localUserID,
            session.phase == .attached || session.phase == .attaching
         {
             return true
@@ -156,7 +156,7 @@ final class REPLPane {
             return "Armed but inactive — resume spawn gating to capture launches."
         }
         if let host = session.host,
-           host.id != engine?.collaboration.localUser?.id,
+           host.id != engine?.localUserID,
            engine?.node(forSessionID: session.id) == nil,
            session.phase == .attached || session.phase == .attaching
         {

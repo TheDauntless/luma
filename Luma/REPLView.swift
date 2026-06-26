@@ -37,7 +37,7 @@ struct REPLView: View {
         if engine.isHostingNode(sessionID) { return true }
         guard let session,
               let host = session.host,
-              host.id != engine.collaboration.localUser?.id
+              host.id != engine.localUserID
         else { return false }
         return session.phase == .attached || session.phase == .attaching
     }
@@ -63,7 +63,7 @@ struct REPLView: View {
             return "Armed but inactive — resume spawn gating to capture launches."
         }
         if let host = session.host,
-           host.id != engine.collaboration.localUser?.id,
+           host.id != engine.localUserID,
            engine.node(forSessionID: session.id) == nil,
            session.phase == .attached || session.phase == .attaching
         {
@@ -179,7 +179,7 @@ struct REPLView: View {
                     .frame(minHeight: 22)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("repl.input")
-                } else if let driver {
+                } else if let driver, !localUserIsDriver {
                     ZStack(alignment: .leading) {
                         REPLInputField(
                             text: .constant(""),

@@ -2090,7 +2090,7 @@ final class MainWindow: InstrumentUIHost {
     func reestablishSession(id: UUID) {
         guard let engine else { return }
         let session = engine.sessions.first(where: { $0.id == id })
-        let ownsHost = session?.host.map { $0.id == engine.collaboration.localUser?.id } ?? true
+        let ownsHost = session.map { engine.localUserHosts($0) } ?? true
         Task { @MainActor in
             let result: Engine.ReestablishResult
             if ownsHost {
@@ -2969,7 +2969,7 @@ final class MainWindow: InstrumentUIHost {
         guard let engine,
               let host = session.host,
               engine.node(forSessionID: session.id) == nil,
-              host.id != engine.collaboration.localUser?.id
+              host.id != engine.localUserID
         else { return nil }
         let avatar = makeHostAvatar(host: host, size: 18)
         avatar.tooltipText = "Hosted by @\(host.id) on \(session.deviceName)"
