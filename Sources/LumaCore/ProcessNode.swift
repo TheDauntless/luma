@@ -706,32 +706,48 @@ public final class ProcessNode: Identifiable {
 
     // MARK: - REPL
 
+    public var evaluateRadare2: ((String) async -> REPLResult.Value)!
+
     @discardableResult
-    public func evalInREPL(_ code: String, cellID: UUID = UUID()) async -> REPLResult? {
+    public func evalInREPL(_ code: String, language: REPLLanguage = .javascript, cellID: UUID = UUID()) async -> REPLResult? {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let (jsCode, pipeline) = splitCodeAndPipeline(trimmed)
+        switch language {
+        case .javascript:
+            return await evalJavaScript(trimmed, cellID: cellID)
+        case .r2:
+            return await evalRadare2(trimmed, cellID: cellID)
+        }
+    }
+
+    private func evalJavaScript(_ code: String, cellID: UUID) async -> REPLResult? {
+        let (jsCode, pipeline) = splitCodeAndPipeline(code)
 
         do {
             let anyResult = try await script.exports.evaluate(jsCode, ["raw": pipeline != nil])
 
             if let pipeline {
-                return try await handlePipelineResult(anyResult, cellID: cellID, originalCode: trimmed, pipeline: pipeline)
+                return try await handlePipelineResult(anyResult, cellID: cellID, originalCode: code, pipeline: pipeline)
             }
 
             guard let jsValue = try? JSInspectValue.decodePacked(from: anyResult) else {
                 return nil
             }
 
-            return emitREPLResult(id: cellID, code: trimmed, value: .js(jsValue))
+            return emitREPLResult(id: cellID, code: code, language: .javascript, value: .js(jsValue))
         } catch {
-            return emitREPLResult(id: cellID, code: trimmed, value: .text("Error: \(error)"))
+            return emitREPLResult(id: cellID, code: code, language: .javascript, value: .text("Error: \(error)"))
         }
     }
 
-    private func emitREPLResult(id: UUID, code: String, value: REPLResult.Value) -> REPLResult {
-        let result = REPLResult(id: id, code: code, value: value)
+    private func evalRadare2(_ command: String, cellID: UUID) async -> REPLResult? {
+        let value = await evaluateRadare2(command)
+        return emitREPLResult(id: cellID, code: command, language: .r2, value: value)
+    }
+
+    private func emitREPLResult(id: UUID, code: String, language: REPLLanguage, value: REPLResult.Value) -> REPLResult {
+        let result = REPLResult(id: id, code: code, language: language, value: value)
         _replResults.yield(result)
         return result
     }
@@ -764,17 +780,17 @@ public final class ProcessNode: Identifiable {
             kind == "error"
         {
             let text = (dict["text"] as? String) ?? "Unknown error"
-            return emitREPLResult(id: cellID, code: originalCode, value: .text(text))
+            return emitREPLResult(id: cellID, code: originalCode, language: .javascript, value: .text(text))
         }
 
         if let pair = anyResult as? [Any], pair.count == 2, let bytes = pair[1] as? [UInt8] {
             let outputString = try await runPipelineToString(pipeline, input: Data(bytes))
-            return emitREPLResult(id: cellID, code: originalCode, value: .text(outputString))
+            return emitREPLResult(id: cellID, code: originalCode, language: .javascript, value: .text(outputString))
         }
 
         if let bytes = anyResult as? [UInt8] {
             let outputString = try await runPipelineToString(pipeline, input: Data(bytes))
-            return emitREPLResult(id: cellID, code: originalCode, value: .text(outputString))
+            return emitREPLResult(id: cellID, code: originalCode, language: .javascript, value: .text(outputString))
         }
 
         if let value = anyResult,
@@ -782,11 +798,11 @@ public final class ProcessNode: Identifiable {
             let inputData = try? JSONSerialization.data(withJSONObject: value)
         {
             let outputString = try await runPipelineToString(pipeline, input: inputData)
-            return emitREPLResult(id: cellID, code: originalCode, value: .text(outputString))
+            return emitREPLResult(id: cellID, code: originalCode, language: .javascript, value: .text(outputString))
         }
 
         let s = anyResult.map { String(describing: $0) } ?? "null"
-        return emitREPLResult(id: cellID, code: originalCode, value: .text(s))
+        return emitREPLResult(id: cellID, code: originalCode, language: .javascript, value: .text(s))
     }
 
     private func runPipelineToString(_ command: String, input: Data) async throws -> String {

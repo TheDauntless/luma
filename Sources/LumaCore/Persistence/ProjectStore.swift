@@ -1414,6 +1414,7 @@ public final class ProjectStore: Sendable {
                 .references("process_session", onDelete: .cascade)
             t.column("author", .blob)
             t.column("code", .text).notNull()
+            t.column("language", .text).notNull().defaults(to: REPLLanguage.javascript.rawValue)
             t.column("result", .blob).notNull()
             t.column("timestamp", .datetime).notNull()
             t.column("is_session_boundary", .boolean).notNull().defaults(to: false)

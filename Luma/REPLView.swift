@@ -2,6 +2,22 @@ import Frida
 import SwiftUI
 import LumaCore
 
+extension LumaCore.REPLLanguage {
+    var promptLabel: String {
+        switch self {
+        case .javascript: return "js"
+        case .r2: return "r2"
+        }
+    }
+
+    var promptColor: Color {
+        switch self {
+        case .javascript: return .orange
+        case .r2: return .blue
+        }
+    }
+}
+
 struct REPLView: View {
     let sessionID: UUID
     let engine: Engine
@@ -9,6 +25,7 @@ struct REPLView: View {
 
     @State private var inputCode: String = ""
     @State private var isInputFocused: Bool = false
+    @State private var mode: LumaCore.REPLLanguage = .javascript
 
     @State private var historyCursor: Int = 0
     @State private var historyCursorInitialized = false
@@ -149,9 +166,15 @@ struct REPLView: View {
             Divider()
 
             HStack(spacing: 8) {
-                Text("›")
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                Button {
+                    toggleMode()
+                } label: {
+                    Text("\(mode.promptLabel) ›")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(mode.promptColor)
+                }
+                .buttonStyle(.plain)
+                .help("Switch between JavaScript and r2 input — or type “:” to toggle")
 
                 if canSubmit {
                     REPLInputField(
@@ -262,12 +285,19 @@ struct REPLView: View {
             return
         }
 
+        if let switched = modeCommand(code) {
+            mode = switched
+            isInputFocused = true
+            return
+        }
+
         if engine.isHostedRemotelyLive(sessionID) {
             let cellID = UUID()
             let placeholder = LumaCore.REPLCell(
                 id: cellID,
                 sessionID: sessionID,
                 code: code,
+                language: mode,
                 result: .text("Running…"),
                 timestamp: Date()
             )
@@ -275,19 +305,34 @@ struct REPLView: View {
             engine.collaboration.sendReplEvalRequest(
                 sessionID: sessionID,
                 code: code,
+                language: mode,
                 cellID: cellID
             )
             reloadCells()
             historyCursor = commandHistory.count
         } else if let node {
             Task { @MainActor in
-                await node.evalInREPL(code)
+                await node.evalInREPL(code, language: mode)
                 reloadCells()
                 historyCursor = commandHistory.count
             }
         }
 
         isInputFocused = true
+    }
+
+    private func toggleMode() {
+        mode = mode == .javascript ? .r2 : .javascript
+        isInputFocused = true
+    }
+
+    private func modeCommand(_ code: String) -> LumaCore.REPLLanguage? {
+        switch code {
+        case ":": return mode == .javascript ? .r2 : .javascript
+        case ":js", ":javascript": return .javascript
+        case ":r2": return .r2
+        default: return nil
+        }
     }
 
     private func historyPrevious() {
@@ -398,9 +443,9 @@ private struct REPLCellView: View {
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("›")
+                    Text("\(cell.language.promptLabel) ›")
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(cell.language.promptColor)
                     Text(DisplayTruncation.truncated(cell.code))
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
@@ -420,6 +465,10 @@ private struct REPLCellView: View {
                     switch cell.result {
                     case .text(let s):
                         Text(DisplayTruncation.truncated(s))
+                            .textSelection(.enabled)
+
+                    case .styled(let s):
+                        Text(DisplayTruncation.truncated(s).attributed)
                             .textSelection(.enabled)
 
                     case .js(let v):
@@ -462,6 +511,9 @@ private struct REPLCellView: View {
             switch cell.result {
             case .text(let s):
                 return (s, nil, nil)
+
+            case .styled(let s):
+                return (s.plainText, nil, nil)
 
             case .js(let v):
                 return ("", nil, v)

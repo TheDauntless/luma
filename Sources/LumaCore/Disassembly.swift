@@ -1,6 +1,6 @@
 import Foundation
 
-public struct RGBColor: Hashable, Sendable {
+public struct RGBColor: Hashable, Sendable, Codable {
     public let r: UInt8
     public let g: UInt8
     public let b: UInt8
@@ -12,8 +12,8 @@ public struct RGBColor: Hashable, Sendable {
     }
 }
 
-public struct StyledText: Sendable, Hashable {
-    public struct Span: Sendable, Hashable {
+public struct StyledText: Sendable, Hashable, Codable {
+    public struct Span: Sendable, Hashable, Codable {
         public let text: String
         public let foreground: RGBColor?
         public let background: RGBColor?

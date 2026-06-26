@@ -326,7 +326,7 @@ public final class CollaborationSession {
     public var onSessionThreadsUpdated: ((UUID, ThreadDelta) -> Void)?
     public var onSessionHostChanged: ((UUID, UserInfo, String, String, UInt, String) -> Void)?
     public var onSessionReplCellAdded: ((UUID, REPLCell) -> Void)?
-    public var onSessionReplEvalRequested: ((UUID, String, UUID) -> Void)?
+    public var onSessionReplEvalRequested: ((UUID, String, REPLLanguage, UUID) -> Void)?
     public var onSessionInstrumentAdded: ((UUID, InstrumentInstance) -> Void)?
     public var onSessionInstrumentUpdated: ((UUID, InstrumentInstance) -> Void)?
     public var onSessionInstrumentRemoved: ((UUID, UUID) -> Void)?
@@ -1202,12 +1202,12 @@ public final class CollaborationSession {
     }
 
 
-    public func sendReplEvalRequest(sessionID: UUID, code: String, cellID: UUID) {
+    public func sendReplEvalRequest(sessionID: UUID, code: String, language: REPLLanguage, cellID: UUID) {
         guard case .joined(let labID) = status else { return }
         sendNotification(
             to: "/labs/\(labID)/sessions/\(sessionID.uuidString)/repl/cells/\(cellID.uuidString)",
             type: "+eval",
-            payload: ["code": code]
+            payload: ["code": code, "language": language.rawValue]
         )
         schedulePendingReplTimeout(cellID: cellID)
     }
@@ -1798,7 +1798,8 @@ public final class CollaborationSession {
                 let cellID = UUID(uuidString: s[6]),
                 let code = payload["code"] as? String
             else { return }
-            onSessionReplEvalRequested?(sessionID, code, cellID)
+            let language = (payload["language"] as? String).flatMap(REPLLanguage.init(rawValue:)) ?? .javascript
+            onSessionReplEvalRequested?(sessionID, code, language, cellID)
 
         case ("+enable", let s)
             where s.count == 6 && s[0] == "labs" && s[2] == "sessions" && s[4] == "instruments":

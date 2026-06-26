@@ -8,6 +8,7 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
     public var sessionID: UUID
     public var author: Author?
     public var code: String
+    public var language: REPLLanguage
     public var result: Result
     public var timestamp: Date
     public var isSessionBoundary: Bool
@@ -17,6 +18,7 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
         case sessionID = "session_id"
         case author
         case code
+        case language
         case result
         case timestamp
         case isSessionBoundary = "is_session_boundary"
@@ -27,6 +29,7 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
         sessionID: UUID,
         author: Author? = nil,
         code: String,
+        language: REPLLanguage = .javascript,
         result: Result,
         timestamp: Date = .now,
         isSessionBoundary: Bool = false
@@ -35,6 +38,7 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
         self.sessionID = sessionID
         self.author = author
         self.code = code
+        self.language = language
         self.result = result
         self.timestamp = timestamp
         self.isSessionBoundary = isSessionBoundary
@@ -42,6 +46,7 @@ public struct REPLCell: Codable, Identifiable, Sendable, FetchableRecord, Persis
 
     public enum Result: Codable, Equatable, Sendable {
         case text(String)
+        case styled(StyledText)
         case js(JSInspectValue)
         case binary(Data, meta: BinaryMeta?)
 

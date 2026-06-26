@@ -14,4 +14,23 @@ public enum DisplayTruncation {
         let head = String(decoding: text.utf8.prefix(limit), as: UTF8.self)
         return head + "\n… <truncated; \(byteCount) bytes total>"
     }
+
+    public static func truncated(_ styled: StyledText, limit: Int = maxInlineBytes) -> StyledText {
+        let plain = styled.plainText
+        let byteCount = plain.utf8.count
+        if byteCount <= limit { return styled }
+
+        var charCount = 0
+        var bytes = 0
+        for character in plain {
+            let characterBytes = String(character).utf8.count
+            if bytes + characterBytes > limit { break }
+            bytes += characterBytes
+            charCount += 1
+        }
+
+        let head = styled.slice(charRange: 0..<charCount)
+        let marker = StyledText.Span(text: "\n… <truncated; \(byteCount) bytes total>")
+        return StyledText(spans: head.spans + [marker])
+    }
 }

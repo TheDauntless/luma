@@ -1,6 +1,7 @@
 import Foundation
 import Frida
 import Observation
+import SwiftyR2
 
 public enum EngineError: Swift.Error, LocalizedError {
     case spawnedProcessNotFound(pid: UInt)
@@ -1031,8 +1032,8 @@ public final class Engine {
             self?.applyRemoteSessionReplCell(sessionID: sessionID, cell: cell)
         }
 
-        collaboration.onSessionReplEvalRequested = { [weak self] sessionID, code, cellID in
-            self?.handleRemoteReplEvalRequest(sessionID: sessionID, code: code, cellID: cellID)
+        collaboration.onSessionReplEvalRequested = { [weak self] sessionID, code, language, cellID in
+            self?.handleRemoteReplEvalRequest(sessionID: sessionID, code: code, language: language, cellID: cellID)
         }
 
         collaboration.onSessionInstrumentAdded = { [weak self] sessionID, instance in
@@ -1295,10 +1296,10 @@ public final class Engine {
         collaboration.enqueueUpdateInstrument(sessionID: instance.sessionID, instance: instance, runtimeStatus: status)
     }
 
-    private func handleRemoteReplEvalRequest(sessionID: UUID, code: String, cellID: UUID) {
+    private func handleRemoteReplEvalRequest(sessionID: UUID, code: String, language: REPLLanguage, cellID: UUID) {
         guard let node = processNodes.first(where: { $0.sessionID == sessionID }) else { return }
         Task { @MainActor in
-            await node.evalInREPL(code, cellID: cellID)
+            await node.evalInREPL(code, language: language, cellID: cellID)
         }
     }
 
@@ -2478,6 +2479,28 @@ public final class Engine {
         }
         disassemblers[sessionID] = d
         return d
+    }
+
+    private func radare2REPLValue(forCommand command: String, sessionID: UUID) async -> REPLResult.Value {
+        guard let disassembler = disassembler(forSessionID: sessionID) else {
+            return .text("r2 is unavailable until the process is attached.")
+        }
+        let result = await disassembler.runCommand(command)
+        return replValue(forR2Result: result)
+    }
+
+    private func replValue(forR2Result result: R2CommandResult) -> REPLResult.Value {
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !result.hasErrors, let structured = JSInspectValue.fromJSONText(output) {
+            return .js(structured)
+        }
+        return .styled(StyledText.parseAnsi(combine(output, errors: result.errors)))
+    }
+
+    private func combine(_ output: String, errors: [R2LogEntry]) -> String {
+        guard !errors.isEmpty else { return output }
+        let messages = errors.map(\.message).joined(separator: "\n")
+        return output.isEmpty ? messages : output + "\n" + messages
     }
 
     private func linkInsightsForFreshAnalysis(sessionID: UUID, analysis: ModuleAnalysis) async {
@@ -5009,6 +5032,11 @@ public func deleteCustomInstrument(_ defID: UUID) async {
             }
         }
 
+        node.evaluateRadare2 = { [weak self] command in
+            guard let self else { return .text("Session unavailable.") }
+            return await self.radare2REPLValue(forCommand: command, sessionID: sessionID)
+        }
+
         Task { @MainActor [weak self, weak node] in
             guard let node else { return }
             for await result in node.replResults {
@@ -5016,11 +5044,13 @@ public func deleteCustomInstrument(_ defID: UUID) async {
                 switch result.value {
                 case .js(let v): resultValue = .js(v)
                 case .text(let t): resultValue = .text(t)
+                case .styled(let s): resultValue = .styled(s)
                 }
                 let cell = REPLCell(
                     id: result.id,
                     sessionID: sessionID,
                     code: result.code,
+                    language: result.language,
                     result: resultValue,
                     timestamp: result.timestamp
                 )

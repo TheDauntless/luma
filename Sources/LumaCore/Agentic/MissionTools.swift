@@ -1373,6 +1373,12 @@ public enum MissionTools {
             payload["text"] = text
             let preview = text.count > 96 ? text.prefix(95) + "…" : Substring(text)
             summary = "REPL cell \(cellShort) → \(preview)"
+        case .styled(let styled):
+            let text = styled.plainText
+            payload["kind"] = "text"
+            payload["text"] = text
+            let preview = text.count > 96 ? text.prefix(95) + "…" : Substring(text)
+            summary = "REPL cell \(cellShort) → \(preview)"
         }
         return makeResult(jsonObject: payload, summary: summary)
     }
