@@ -371,7 +371,12 @@ final class JSInspectValueWidget {
     private static func scalarMarkup(_ value: JSInspectValue) -> String {
         switch value {
         case .number(let n):
-            let s = (n.rounded(.towardZero) == n) ? String(Int(n)) : String(n)
+            let s: String
+            if n.rounded(.towardZero) == n {
+                s = Int(exactly: n).map(String.init) ?? String(format: "%.0f", n)
+            } else {
+                s = String(n)
+            }
             return span(escape(s), color: cyan)
         case .string(let s):
             return span(escape("\"\(s)\""), color: mint)

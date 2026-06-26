@@ -6,7 +6,7 @@ extension JSInspectValue {
         switch self {
         case .number(let n):
             if n.rounded(.towardZero) == n {
-                return String(Int(n))
+                return Int(exactly: n).map(String.init) ?? String(format: "%.0f", n)
             } else {
                 return String(n)
             }
@@ -110,7 +110,7 @@ extension JSInspectValue {
         case .number(let n):
             let s: String
             if n.rounded(.towardZero) == n {
-                s = String(Int(n))
+                s = Int(exactly: n).map(String.init) ?? String(format: "%.0f", n)
             } else {
                 s = String(n)
             }
