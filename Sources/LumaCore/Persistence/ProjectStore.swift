@@ -1793,6 +1793,22 @@ public final class ProjectStore: Sendable {
             t.column("payload_json", .text).notNull()
             t.column("created_at", .datetime).notNull()
         }
+
+        try addColumnsForExistingDatabases(db)
+    }
+
+    private static func addColumnsForExistingDatabases(_ db: Database) throws {
+        let javascript = REPLLanguage.javascript.rawValue
+        try addColumnIfMissing(db, table: "repl_cell", column: "language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
+        try addColumnIfMissing(db, table: "notebook_entry", column: "styled_details", definition: "BLOB")
+        try addColumnIfMissing(db, table: "session_ui_state", column: "repl_language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
+        try addColumnIfMissing(db, table: "session_ui_state", column: "repl_draft", definition: "TEXT")
+        try addColumnIfMissing(db, table: "session_ui_state", column: "repl_seek_anchor", definition: "TEXT")
+    }
+
+    private static func addColumnIfMissing(_ db: Database, table: String, column: String, definition: String) throws {
+        guard try !db.columns(in: table).contains(where: { $0.name == column }) else { return }
+        try db.execute(sql: "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
     }
 }
 
