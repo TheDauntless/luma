@@ -1437,6 +1437,7 @@ public final class ProjectStore: Sendable {
             t.column("position", .double).notNull().defaults(to: 0)
             t.column("title", .text).notNull()
             t.column("details", .text).notNull()
+            t.column("styled_details", .blob)
             t.column("js_value", .blob)
             t.column("binary_data", .blob)
             t.column("session_id", .text)

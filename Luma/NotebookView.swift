@@ -399,6 +399,10 @@ struct NotebookEntryRow: View {
                 selection: $selection
             )
             .font(.system(.footnote, design: .monospaced))
+        } else if let styled = entry.styledDetails {
+            Text(styled.attributed)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
         } else if !entry.details.isEmpty {
             Text(entry.details)
                 .font(.system(.body, design: .monospaced))

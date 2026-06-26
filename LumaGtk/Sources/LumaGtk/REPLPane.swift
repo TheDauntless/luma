@@ -432,6 +432,7 @@ final class REPLPane {
         let processName = engine.sessions.first { $0.id == sessionID }?.processName ?? ""
 
         let details: String
+        var styled: LumaCore.StyledText? = nil
         var binary: Data? = nil
         var jsValue: LumaCore.JSInspectValue? = nil
         switch cell.result {
@@ -439,6 +440,7 @@ final class REPLPane {
             details = s
         case .styled(let s):
             details = s.plainText
+            styled = s
         case .js(let v):
             details = ""
             jsValue = v
@@ -450,6 +452,7 @@ final class REPLPane {
         var entry = LumaCore.NotebookEntry(
             title: cell.code,
             details: details,
+            styledDetails: styled,
             binaryData: binary,
             sessionID: sessionID,
             processName: processName

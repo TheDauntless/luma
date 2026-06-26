@@ -403,6 +403,16 @@ final class NotebookPane {
                 let valueWidget = wrapper.widget
                 valueWidget.hexpand = true
                 inner.append(child: valueWidget)
+            } else if let styled = entry.styledDetails {
+                let body = Label(str: "")
+                body.add(cssClass: "monospace")
+                body.useMarkup = true
+                body.setMarkup(str: StyledTextPango.markup(for: styled))
+                body.halign = .start
+                body.hexpand = true
+                body.wrap = true
+                body.selectable = true
+                inner.append(child: body)
             } else if !entry.details.isEmpty {
                 let body = Label(str: entry.details)
                 body.add(cssClass: "monospace")

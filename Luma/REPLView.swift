@@ -549,26 +549,27 @@ private struct REPLCellView: View {
     }
 
     private func addToNotebook() {
-        let (details, binary, jsValue): (String, Data?, JSInspectValue?) = {
+        let (details, styled, binary, jsValue): (String, LumaCore.StyledText?, Data?, JSInspectValue?) = {
             switch cell.result {
             case .text(let s):
-                return (s, nil, nil)
+                return (s, nil, nil, nil)
 
             case .styled(let s):
-                return (s.plainText, nil, nil)
+                return (s.plainText, s, nil, nil)
 
             case .js(let v):
-                return ("", nil, v)
+                return ("", nil, nil, v)
 
             case .binary(let data, let meta):
                 let header = binaryMetaString(meta, dataCount: data.count)
-                return (header, data, nil)
+                return (header, nil, data, nil)
             }
         }()
 
         var entry = LumaCore.NotebookEntry(
             title: cell.code,
             details: details,
+            styledDetails: styled,
             binaryData: binary,
             sessionID: sessionID,
             processName: processName

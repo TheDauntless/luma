@@ -24,6 +24,7 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
     public var position: Double
     public var title: String
     public var details: String
+    public var styledDetails: StyledText?
     public var jsValue: JSInspectValue?
     public var binaryData: Data?
     public var sessionID: UUID?
@@ -39,6 +40,7 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
         case position
         case title
         case details
+        case styledDetails = "styled_details"
         case jsValue = "js_value"
         case binaryData = "binary_data"
         case sessionID = "session_id"
@@ -53,6 +55,7 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
         position: Double = 0,
         title: String,
         details: String,
+        styledDetails: StyledText? = nil,
         jsValue: JSInspectValue? = nil,
         binaryData: Data? = nil,
         sessionID: UUID? = nil,
@@ -65,6 +68,7 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
         self.position = position
         self.title = title
         self.details = details
+        self.styledDetails = styledDetails
         self.jsValue = jsValue
         self.binaryData = binaryData
         self.sessionID = sessionID
@@ -91,6 +95,13 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
             "title": title,
             "details": details,
         ]
+
+        if let styled = styledDetails,
+            let data = try? JSONEncoder().encode(styled),
+            let jsonObject = try? JSONSerialization.jsonObject(with: data)
+        {
+            obj["styled_details"] = jsonObject
+        }
 
         if let val = jsValue,
             let data = try? JSONEncoder().encode(val),
@@ -137,6 +148,14 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
             ?? (obj["position"] as? NSNumber)?.doubleValue
             ?? 0
 
+        var styledDetails: StyledText? = nil
+        if let raw = obj["styled_details"],
+            let data = try? JSONSerialization.data(withJSONObject: raw),
+            let decoded = try? JSONDecoder().decode(StyledText.self, from: data)
+        {
+            styledDetails = decoded
+        }
+
         var jsValue: JSInspectValue? = nil
         if let raw = obj["js_value"] {
             if let data = try? JSONSerialization.data(withJSONObject: raw),
@@ -156,6 +175,7 @@ public struct NotebookEntry: Codable, Identifiable, Sendable, FetchableRecord, P
             position: position,
             title: title,
             details: details,
+            styledDetails: styledDetails,
             jsValue: jsValue,
             binaryData: data.map { Data($0) },
             processName: processName
