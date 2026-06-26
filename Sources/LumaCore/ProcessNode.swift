@@ -866,12 +866,22 @@ public final class ProcessNode: Identifiable {
     public var completeRadare2: ((String, Int) async -> [REPLCompletion])!
 
     public func completeInREPL(code: String, cursor: Int, language: REPLLanguage = .javascript) async -> [REPLCompletion] {
+        let head = String(code.prefix(cursor)).trimmingCharacters(in: .whitespaces)
+        if head.hasPrefix(":") {
+            return modeCommandCompletions(typed: head.dropFirst().lowercased())
+        }
         switch language {
         case .javascript:
             return await completeJavaScript(code: code, cursor: cursor)
         case .r2:
             return await completeRadare2(code, cursor)
         }
+    }
+
+    private func modeCommandCompletions(typed: String) -> [REPLCompletion] {
+        [("js", "JavaScript"), ("r2", "radare2")]
+            .filter { $0.0.hasPrefix(typed) }
+            .map { REPLCompletion(insertText: $0.0, displayText: ":\($0.0)", detailText: $0.1) }
     }
 
     private func annotatedCompletion(_ name: String) -> REPLCompletion {
@@ -884,17 +894,24 @@ public final class ProcessNode: Identifiable {
             let anyResult = try await script.exports.complete(code, cursor)
 
             if let strings = anyResult as? [String] {
-                return strings.map(annotatedCompletion)
+                return strings.sorted(by: Self.completionPrecedes).map(annotatedCompletion)
             }
 
             if let anyArray = anyResult as? [Any] {
-                return anyArray.compactMap { $0 as? String }.map(annotatedCompletion)
+                return anyArray.compactMap { $0 as? String }.sorted(by: Self.completionPrecedes).map(annotatedCompletion)
             }
         } catch {
             yieldEngineEvent(subsystem: "repl", level: .warning, text: "Failed to fetch REPL completions: \(error)")
         }
 
         return []
+    }
+
+    private static func completionPrecedes(_ a: String, _ b: String) -> Bool {
+        let aUnderscored = a.hasPrefix("_")
+        let bUnderscored = b.hasPrefix("_")
+        if aUnderscored != bUnderscored { return bUnderscored }
+        return a.lowercased() < b.lowercased()
     }
 
     // MARK: - Memory & Symbolication
