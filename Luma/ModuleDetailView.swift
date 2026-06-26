@@ -125,15 +125,18 @@ struct ModuleDetailView: View {
     }
 
     private func rowCell<V: View>(_ content: V, address: UInt64, context: AddressContext) -> some View {
-        content.pointerActions(
-            engine: engine,
-            sessionID: sessionID,
-            value: String(format: "0x%llx", address),
-            address: address,
-            context: context,
-            copyTitle: "Copy Address",
-            selection: $selection
-        )
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .pointerActions(
+                engine: engine,
+                sessionID: sessionID,
+                value: String(format: "0x%llx", address),
+                address: address,
+                context: context,
+                copyTitle: "Copy Address",
+                selection: $selection
+            )
     }
 
     private func load(_ module: LumaCore.ProcessModule) async {
