@@ -153,7 +153,7 @@ private final class FindingCard {
 
     private weak var engine: Engine?
     private let titleLabel: Label
-    private let bodyLabel: Label
+    private let bodySlot: Box
     private let confidenceSlot: Box
     private let statusSlot: Box
     private let evidenceSection: Box
@@ -205,14 +205,10 @@ private final class FindingCard {
         header.append(child: confidenceSlot)
         inner.append(child: header)
 
-        bodyLabel = Label(str: "")
-        bodyLabel.halign = .fill
-        bodyLabel.xalign = 0
-        bodyLabel.wrap = true
-        bodyLabel.useMarkup = true
-        bodyLabel.selectable = true
-        bodyLabel.add(cssClass: "caption")
-        inner.append(child: bodyLabel)
+        bodySlot = Box(orientation: .vertical, spacing: 0)
+        bodySlot.halign = .fill
+        bodySlot.add(cssClass: "caption")
+        inner.append(child: bodySlot)
 
         evidenceList = Box(orientation: .vertical, spacing: 4)
         evidenceCountLabel = Label(str: "0 evidence")
@@ -277,7 +273,7 @@ private final class FindingCard {
     func update(finding: MissionFinding) {
         currentFinding = finding
         titleLabel.label = finding.title
-        bodyLabel.setMarkup(str: MissionMarkdown.pangoMarkup(from: finding.bodyMarkdown))
+        replaceContents(of: bodySlot, with: MarkdownWidget.make(markdown: finding.bodyMarkdown))
 
         replaceContents(of: confidenceSlot, with: MissionPill.makeConfidence(finding.confidence))
         replaceContents(of: statusSlot, with: MissionPill.makeFindingStatus(finding.status))

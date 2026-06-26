@@ -367,7 +367,7 @@ private func renderBlockEntry(
 @MainActor
 private final class LiveCard {
     let widget: Box
-    private let textLabel: Label
+    private let bodySlot: Box
 
     init(text: String) {
         widget = Box(orientation: .vertical, spacing: 0)
@@ -399,36 +399,22 @@ private final class LiveCard {
         header.append(child: spacer)
         inner.append(child: header)
 
-        textLabel = MissionRichText.makeWrappedLabel(markdown: text)
-        inner.append(child: textLabel)
+        bodySlot = Box(orientation: .vertical, spacing: 8)
+        inner.append(child: bodySlot)
+        fill(text: text)
     }
 
     func update(text: String) {
-        MissionRichText.update(label: textLabel, markdown: text)
+        fill(text: text)
     }
-}
 
-@MainActor
-enum MissionRichText {
-    static func makeWrappedLabel(markdown: String, dimmed: Bool = false) -> Label {
-        let label = Label(str: "")
-        label.halign = .fill
-        label.xalign = 0
-        label.wrap = true
-        label.useMarkup = true
-        label.selectable = true
-        label.wrapMode = WrapMode.wordChar
-        label.maxWidthChars = 0
-        if dimmed {
-            label.add(cssClass: "dim-label")
+    private func fill(text: String) {
+        var child = bodySlot.firstChild
+        while let cur = child {
+            child = cur.nextSibling
+            bodySlot.remove(child: cur)
         }
-        update(label: label, markdown: markdown)
-        return label
-    }
-
-    static func update(label: Label, markdown: String) {
-        let markup = MissionMarkdown.pangoMarkup(from: markdown)
-        label.setMarkup(str: markup)
+        bodySlot.append(child: MarkdownWidget.make(markdown: MarkdownStreaming.stablePrefix(of: text)))
     }
 }
 

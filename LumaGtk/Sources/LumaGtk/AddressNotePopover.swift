@@ -34,10 +34,10 @@ final class AddressNotePopover {
     private var askIcon: Gtk.Image?
     private var cancelIcon: Gtk.Image?
     private var streamingRow: Widget?
-    private var streamingBody: Label?
+    private var streamingBody: Box?
     private var streamingText: String = ""
     private var messageRowsByID: [UUID: Box] = [:]
-    private var messageBodiesByID: [UUID: Label] = [:]
+    private var messageBodiesByID: [UUID: Box] = [:]
     private var errorLabel: Label?
 
     private var notes: [AddressNote] = []
@@ -557,7 +557,7 @@ final class AddressNotePopover {
         makeMessageRowReturningBody(message).row
     }
 
-    private func makeMessageRowReturningBody(_ message: AddressNoteMessage) -> (row: Box, body: Label) {
+    private func makeMessageRowReturningBody(_ message: AddressNoteMessage) -> (row: Box, body: Box) {
         let row = Box(orientation: .vertical, spacing: 2)
         row.halign = .fill
         row.hexpand = true
@@ -582,16 +582,12 @@ final class AddressNotePopover {
         head.append(child: time)
         row.append(child: head)
 
-        let body = Label(str: "")
-        body.setMarkup(str: MissionMarkdown.pangoMarkup(from: message.bodyMarkdown))
-        body.wrap = true
-        body.naturalWrapMode = GTK_NATURAL_WRAP_WORD
-        body.xalign = 0
+        let body = Box(orientation: .vertical, spacing: 0)
         body.halign = .fill
-        body.selectable = true
         body.add(cssClass: "luma-address-note-body")
         body.add(cssClass: "card")
         body.marginTop = 2
+        renderBody(body, markdown: message.bodyMarkdown)
         row.append(child: body)
 
         messageRowsByID[message.id] = row
@@ -602,7 +598,16 @@ final class AddressNotePopover {
         return (row, body)
     }
 
-    private func installUserMessageActions(row: Box, body: Label, message: AddressNoteMessage) {
+    private func renderBody(_ box: Box, markdown: String) {
+        var child = box.firstChild
+        while let cur = child {
+            child = cur.nextSibling
+            box.remove(child: cur)
+        }
+        box.append(child: MarkdownWidget.make(markdown: markdown))
+    }
+
+    private func installUserMessageActions(row: Box, body: Box, message: AddressNoteMessage) {
         let messageID = message.id
         let click = GestureClick()
         click.set(button: 3)
@@ -695,7 +700,7 @@ final class AddressNotePopover {
                     let updated = self.engine?.editUserMessage(noteID: message.noteID, messageID: message.id, body: trimmed)
                 {
                     self.messages = self.messages.map { $0.id == updated.id ? updated : $0 }
-                    body.setMarkup(str: MissionMarkdown.pangoMarkup(from: updated.bodyMarkdown))
+                    self.renderBody(body, markdown: updated.bodyMarkdown)
                 }
                 self.finishEditingMessage(row: row, body: body, scroll: scroll, actions: actions)
             }
@@ -708,7 +713,7 @@ final class AddressNotePopover {
         _ = editor.grabFocus()
     }
 
-    private func finishEditingMessage(row: Box, body: Label, scroll: ScrolledWindow, actions: Box) {
+    private func finishEditingMessage(row: Box, body: Box, scroll: ScrolledWindow, actions: Box) {
         row.remove(child: scroll)
         row.remove(child: actions)
         body.visible = true
@@ -1102,7 +1107,9 @@ final class AddressNotePopover {
 
     private func appendStreamingDelta(_ delta: String) {
         streamingText += delta
-        streamingBody?.setMarkup(str: MissionMarkdown.pangoMarkup(from: streamingText))
+        if let streamingBody {
+            renderBody(streamingBody, markdown: streamingText)
+        }
         scrollToBottom()
     }
 
