@@ -102,7 +102,7 @@ struct ITraceCFGView: NSViewRepresentable {
                         .filter { $0.section == coordinator.currentSection }
                         .min(by: { $0.position.y < $1.position.y })
                     if let first {
-                        coordinator.select(first.key)
+                        coordinator.selectDeferringBinding(first.key)
                     }
                 }
             } else if let oldPos = oldAnchorPos,
@@ -122,7 +122,7 @@ struct ITraceCFGView: NSViewRepresentable {
             if let node = (nav.direction < 0 ? sectionNodes.last : sectionNodes.first) {
                 coordinator.pendingNav = nil
                 let line = nav.direction < 0 ? max(0, coordinator.instructionCount(for: node) - 1) : 0
-                coordinator.select(node.key, line: line)
+                coordinator.selectDeferringBinding(node.key, line: line)
 
                 // Ensure the node is visible, then align Y to section top.
                 coordinator.panToNode(node, axis: .both)
@@ -135,7 +135,7 @@ struct ITraceCFGView: NSViewRepresentable {
             }
             // If no nodes found for the section, keep pendingNav
             // until the graph rebuilds with the right data.
-        } else if selectedNodeKey != coordinator.selectedKey {
+        } else if !coordinator.bindingPushPending, selectedNodeKey != coordinator.selectedKey {
             coordinator.selectedKey = selectedNodeKey
             if let key = selectedNodeKey, let node = coordinator.graph.nodes[key] {
                 coordinator.panToNode(node, axis: .both)
@@ -414,6 +414,7 @@ extension ITraceCFGView {
         weak var container: CFGContainerView?
 
         var selectedBinding: Binding<CFGGraph.NodeKey?>
+        private(set) var bindingPushPending = false
         private var disasmRaw: [UInt64: StyledText] = [:]
         private var disasmRendered: [UInt64: NSAttributedString] = [:]
         private var nodeHeightCache: [UInt64: CGFloat] = [:]
@@ -866,6 +867,21 @@ extension ITraceCFGView {
             selectedKey = key
             selectedInstructionLine = line
             selectedBinding.wrappedValue = key
+        }
+
+        // Writing the binding inside updateNSView mutates observed state
+        // mid-update; defer the push so SwiftUI sees it as a fresh change.
+        func selectDeferringBinding(_ key: CFGGraph.NodeKey?, line: Int = 0) {
+            selectedKey = key
+            selectedInstructionLine = line
+            bindingPushPending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                bindingPushPending = false
+                if selectedKey == key {
+                    selectedBinding.wrappedValue = key
+                }
+            }
         }
 
         var popover: NSPopover?
