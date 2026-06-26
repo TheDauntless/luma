@@ -26,32 +26,12 @@ export function complete(
     const baseExpr = context.baseExpr;
     const fragment = context.fragment;
 
-    let candidates: string[] = [];
+    let candidates: string[];
 
     if (baseExpr !== null) {
-        const base = resolveBase(baseExpr);
-
-        if (base !== null) {
-            try {
-                candidates = Object.getOwnPropertyNames(base as object).map(String);
-            } catch {
-                candidates = [];
-            }
-        }
-
-        if (candidates.length === 0) {
-            try {
-                candidates = Object.getOwnPropertyNames(globalThis as any).map(String);
-            } catch {
-                candidates = [];
-            }
-        }
+        candidates = memberNames(resolveBase(baseExpr));
     } else {
-        try {
-            candidates = Object.getOwnPropertyNames(globalThis as any).map(String);
-        } catch {
-            candidates = [];
-        }
+        candidates = ownNames(globalThis);
     }
 
     if (baseExpr === null && fragment === "") {
@@ -67,6 +47,30 @@ export function complete(
     }
 
     return filtered.slice(0, 256);
+}
+
+function memberNames(base: unknown): string[] {
+    if (base === null || base === undefined) {
+        return [];
+    }
+
+    const names = new Set<string>();
+    let object: unknown = base;
+    while (object !== null && object !== undefined) {
+        for (const name of ownNames(object)) {
+            names.add(name);
+        }
+        object = Object.getPrototypeOf(object);
+    }
+    return Array.from(names);
+}
+
+function ownNames(object: unknown): string[] {
+    try {
+        return Object.getOwnPropertyNames(object as object).map(String);
+    } catch {
+        return [];
+    }
 }
 
 interface CompletionContext {
