@@ -44,6 +44,7 @@ final class EventStreamPane {
     private let liveDot: Label
     private let liveLabel: Label
     private let scroll: ScrolledWindow
+    private let scroller: BottomScroller
     private let listOverlay: Overlay
     private let eventListBox: Box
     private let emptyStateBox: Box
@@ -70,7 +71,6 @@ final class EventStreamPane {
     private var enabledSources: Set<EventSourceFilter> = Set(EventSourceFilter.allCases)
     private var selectedProcessName: String?
     private var searchText: String = ""
-    private var isAutoScrolling: Bool = false
 
     init() {
         widget = Box(orientation: .vertical, spacing: 0)
@@ -177,6 +177,7 @@ final class EventStreamPane {
         scroll.hexpand = true
         scroll.vexpand = true
         scroll.set(child: eventListBox)
+        scroller = BottomScroller(scroll, threshold: 20.0)
 
         emptyStateBox = Box(orientation: .vertical, spacing: 6)
         emptyStateBox.halign = .center
@@ -241,47 +242,18 @@ final class EventStreamPane {
         pauseButton.onToggled { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.isPaused = self.pauseButton.active
-                self.pauseButton.label = self.isPaused ? "Resume" : "Pause"
-                if !self.isPaused {
-                    self.syncSnapshot()
-                    self.pendingNewEvents = 0
-                    self.scrollToBottomSoon()
-                }
-                self.updateLiveIndicator()
-                self.updatePendingPill()
+                self.setPaused(self.pauseButton.active)
             }
+        }
+
+        scroller.onPinnedChanged = { [weak self] pinned in
+            MainActor.assumeIsolated { self?.setPaused(!pinned) }
         }
 
         clearEventsButton.onClicked { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.overflowMenuButton.popdown()
                 self?.clearEvents()
-            }
-        }
-
-        if let vadj = scroll.vadjustment {
-            vadj.onValueChanged { [weak self] adj in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    if self.isAutoScrolling { return }
-                    let atBottom = (adj.upper - (adj.value + adj.pageSize)) < 20.0
-                    if atBottom {
-                        if self.isPaused {
-                            self.isPaused = false
-                            self.pauseButton.active = false
-                            self.pauseButton.label = "Pause"
-                            self.syncSnapshot()
-                            self.updateLiveIndicator()
-                        }
-                    } else if !self.isPaused {
-                        self.isPaused = true
-                        self.pauseButton.active = true
-                        self.pauseButton.label = "Resume"
-                        self.updateLiveIndicator()
-                        self.updatePendingPill()
-                    }
-                }
             }
         }
 
@@ -319,7 +291,7 @@ final class EventStreamPane {
         if !paused {
             syncSnapshot()
             pendingNewEvents = 0
-            scrollToBottomSoon()
+            scroller.pin()
         }
         updateLiveIndicator()
         updatePendingPill()
@@ -387,7 +359,7 @@ final class EventStreamPane {
 
         if appended {
             emptyStateBox.visible = false
-            scrollToBottomSoon()
+            scroller.pin()
         }
         updateBar()
         updatePendingPill()
@@ -405,7 +377,7 @@ final class EventStreamPane {
         rebuildProcessFilterMenu()
         rebuildFiltered()
         updatePendingPill()
-        scrollToBottomSoon()
+        scroller.pin()
     }
 
     private func clearEvents() {
@@ -526,17 +498,6 @@ final class EventStreamPane {
         }
     }
 
-    private func scrollToBottomSoon() {
-        Task { @MainActor in
-            guard let adj = scroll.vadjustment else { return }
-            let target = adj.upper - adj.pageSize
-            if target > adj.value {
-                isAutoScrolling = true
-                adj.value = target
-                isAutoScrolling = false
-            }
-        }
-    }
 
     // MARK: - Filter menus
 

@@ -29,6 +29,7 @@ final class ConsoleView {
     private let emptyState: Widget
     private let cellsBox: Box
     private let cellsScroll: ScrolledWindow
+    private let scroller: BottomScroller
     private let contentSlot: Box
     private let prompt: Label
     private let inputEntry: Entry
@@ -48,10 +49,6 @@ final class ConsoleView {
     private var completionScroll: ScrolledWindow?
     private var completionItems: [REPLCompletion] = []
     private var completionBaseCode: String = ""
-
-    private var wantBottom = true
-    private var autoScrolling = false
-    private var scrollPending = false
 
     init(style: Style, emptyState: Widget) {
         self.style = style
@@ -75,6 +72,7 @@ final class ConsoleView {
         cellsScroll.vexpand = true
         cellsScroll.add(cssClass: "view")
         cellsScroll.set(child: cellsBox)
+        scroller = BottomScroller(cellsScroll, threshold: 2.0)
 
         contentSlot = Box(orientation: .vertical, spacing: 0)
         contentSlot.hexpand = true
@@ -117,19 +115,7 @@ final class ConsoleView {
             hasEntries = true
         }
         cellsBox.append(child: child)
-        wantBottom = true
-    }
-
-    private func scheduleBottomScroll() {
-        guard !scrollPending else { return }
-        scrollPending = true
-        Task { @MainActor in
-            self.scrollPending = false
-            guard self.wantBottom, let adj = self.cellsScroll.vadjustment else { return }
-            self.autoScrolling = true
-            adj.value = adj.upper - adj.pageSize
-            self.autoScrolling = false
-        }
+        scroller.pin()
     }
 
     func clearEntries() {
@@ -191,21 +177,6 @@ final class ConsoleView {
             MainActor.assumeIsolated { self?.onPromptClicked?() }
         }
         prompt.install(controller: promptClick)
-
-        if let vadj = cellsScroll.vadjustment {
-            vadj.onChanged { [weak self] adj in
-                MainActor.assumeIsolated {
-                    guard let self, self.wantBottom else { return }
-                    self.scheduleBottomScroll()
-                }
-            }
-            vadj.onValueChanged { [weak self] adj in
-                MainActor.assumeIsolated {
-                    guard let self, !self.autoScrolling else { return }
-                    self.wantBottom = (adj.upper - (adj.value + adj.pageSize)) < 2.0
-                }
-            }
-        }
 
         let keyController = EventControllerKey()
         keyController.propagationPhase = GTK_PHASE_CAPTURE

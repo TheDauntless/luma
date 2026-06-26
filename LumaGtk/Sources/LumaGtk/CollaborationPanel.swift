@@ -25,6 +25,7 @@ final class CollaborationPanel {
     private let notificationsButton: Button
     private let chatListBox: ListBox
     private let chatScroll: ScrolledWindow
+    private let chatScroller: BottomScroller
     private let chatEntry: Entry
     private let chatSendButton: Button
 
@@ -33,9 +34,7 @@ final class CollaborationPanel {
     private var participantWidgets: [String: Widget] = [:]
     private var copiedToastLabel: Label?
     private var copiedToastResetTask: Task<Void, Never>?
-    private var isPinnedToBottom = true
     private var lastChatCount = 0
-    private var suppressScrollPinUpdate = false
     private var signInWindow: Adw.Dialog?
     private var isEditingLabTitle: Bool = false
     private var chatRows: [UUID: ListBoxRow] = [:]
@@ -134,6 +133,7 @@ final class CollaborationPanel {
         chatScroll.vexpand = true
         chatScroll.setSizeRequest(width: -1, height: 160)
         chatScroll.set(child: chatListBox)
+        chatScroller = BottomScroller(chatScroll)
         chatSection.append(child: chatScroll)
 
         let inputRow = Box(orientation: .horizontal, spacing: 6)
@@ -161,17 +161,6 @@ final class CollaborationPanel {
         chatSendButton.onClicked { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.sendChat()
-            }
-        }
-
-        if let vadj = chatScroll.vadjustment {
-            vadj.onValueChanged { [weak self] adj in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    if self.suppressScrollPinUpdate { return }
-                    let atBottom = (adj.upper - (adj.value + adj.pageSize)) < 20.0
-                    self.isPinnedToBottom = atBottom
-                }
             }
         }
 
@@ -907,7 +896,6 @@ final class CollaborationPanel {
         case .appended(let message):
             appendChatRow(for: message)
             lastChatCount += 1
-            if isPinnedToBottom { scrollChatToBottomSoon() }
             refreshChatInputState()
         case .replaced(let id, let message):
             replaceChatRow(id: id, with: message)
@@ -927,7 +915,6 @@ final class CollaborationPanel {
             appendChatRow(for: message)
         }
         lastChatCount = engine.collaboration.chatMessages.count
-        if isPinnedToBottom { scrollChatToBottomSoon() }
         refreshChatInputState()
     }
 
@@ -1099,19 +1086,6 @@ final class CollaborationPanel {
     }
 
     // MARK: - Scroll / input
-
-    private func scrollChatToBottomSoon() {
-        Task { @MainActor in
-            guard let adj = chatScroll.vadjustment else { return }
-            let target = adj.upper - adj.pageSize
-            if target > adj.value {
-                self.suppressScrollPinUpdate = true
-                adj.value = target
-                self.suppressScrollPinUpdate = false
-                self.isPinnedToBottom = true
-            }
-        }
-    }
 
     private func showInviteCopiedToast() {
         guard let toast = copiedToastLabel else { return }

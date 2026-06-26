@@ -10,6 +10,7 @@ final class MissionTranscriptView {
 
     private let listBox: Box
     private let scroll: ScrolledWindow
+    private let scroller: BottomScroller
     private let placeholder: Adw.StatusPage
 
     private var turnIDOrder: [UUID] = []
@@ -35,6 +36,7 @@ final class MissionTranscriptView {
         scroll.hexpand = true
         scroll.vexpand = true
         scroll.set(child: listBox)
+        scroller = BottomScroller(scroll)
 
         placeholder = Adw.StatusPage()
         placeholder.set(iconName: "mail-send-symbolic")
@@ -92,7 +94,7 @@ final class MissionTranscriptView {
 
         turnIDOrder = newOrder
         renderPlaceholderIfNeeded()
-        scrollToBottom()
+        scroller.pin()
     }
 
     func applyActions(_ actions: [MissionAction]) {
@@ -125,7 +127,7 @@ final class MissionTranscriptView {
             ensureScrollVisible()
             listBox.append(child: live.widget)
         }
-        scrollToBottom()
+        scroller.pin()
     }
 
     private func rebuildActionMaps(_ actions: [MissionAction]) {
@@ -164,12 +166,6 @@ final class MissionTranscriptView {
         }
     }
 
-    private func scrollToBottom() {
-        Task { @MainActor in
-            guard let adjustment = self.scroll.vadjustment else { return }
-            adjustment.value = adjustment.upper
-        }
-    }
 }
 
 @MainActor
