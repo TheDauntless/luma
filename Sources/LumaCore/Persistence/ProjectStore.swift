@@ -506,6 +506,15 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    public func fetchAnalyzedModulePaths(sessionID: UUID) throws -> [String] {
+        try db.read { db in
+            try ModuleAnalysisRow
+                .filter(Column("session_id") == sessionID)
+                .fetchAll(db)
+                .map(\.modulePath)
+        }
+    }
+
     public func save(_ analysis: ModuleAnalysis) throws {
         try db.write { db in
             try writeModuleAnalysis(db, analysis: analysis)

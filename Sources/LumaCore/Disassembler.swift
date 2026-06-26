@@ -155,6 +155,13 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         return await fetchFunctionEnd(hex: String(address, radix: 16))
     }
 
+    public func warmUp(modules: [ProcessModule]) async {
+        await ensureOpened()
+        for module in modules {
+            await ensureModuleAnalyzed(module: module)
+        }
+    }
+
     public func applyInsightName(at address: UInt64, title: String) async {
         await ensureOpened()
         if let module = moduleContaining(address: address) {

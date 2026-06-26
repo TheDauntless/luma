@@ -67,6 +67,7 @@ public final class Engine {
     public let customInstruments: CustomInstrumentLibrary
 
     @ObservationIgnored private var disassemblers: [UUID: Disassembler] = [:]
+    @ObservationIgnored private var prewarmedSessions: Set<UUID> = []
     @ObservationIgnored private var memoryReaders: [UUID: CachingMemoryReader] = [:]
 
     public let collaboration: CollaborationSession
@@ -2614,6 +2615,20 @@ public final class Engine {
         guard !errors.isEmpty else { return output }
         let messages = errors.map(\.message).joined(separator: "\n")
         return output.isEmpty ? messages : output + "\n" + messages
+    }
+
+    private func prewarmPersistedAnalysis(sessionID: UUID) {
+        guard prewarmedSessions.insert(sessionID).inserted else { return }
+
+        let analyzedPaths = Set((try? store.fetchAnalyzedModulePaths(sessionID: sessionID)) ?? [])
+        guard !analyzedPaths.isEmpty else { return }
+
+        let modules = modulesSnapshot(forSessionID: sessionID).filter { analyzedPaths.contains($0.path) }
+        guard !modules.isEmpty, let disassembler = disassembler(forSessionID: sessionID) else { return }
+
+        Task(priority: .utility) { @MainActor in
+            await disassembler.warmUp(modules: modules)
+        }
     }
 
     private func linkInsightsForFreshAnalysis(sessionID: UUID, analysis: ModuleAnalysis) async {
@@ -5201,6 +5216,7 @@ public func deleteCustomInstrument(_ defID: UUID) async {
                     session.lastKnownModules = delta.applied(to: session.lastKnownModules)
                 }
                 self?.rebuildAddressAnnotations(sessionID: sessionID)
+                self?.prewarmPersistedAnalysis(sessionID: sessionID)
                 if let sid = self?.collabSessionID(forNode: node) {
                     self?.collaboration.enqueueUpdateSessionModules(sessionID: sid, delta: delta)
                 }
