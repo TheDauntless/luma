@@ -506,15 +506,6 @@ public final class ProjectStore: Sendable {
         }
     }
 
-    public func fetchAnalyzedModulePaths(sessionID: UUID) throws -> [String] {
-        try db.read { db in
-            try ModuleAnalysisRow
-                .filter(Column("session_id") == sessionID)
-                .fetchAll(db)
-                .map(\.modulePath)
-        }
-    }
-
     public func save(_ analysis: ModuleAnalysis) throws {
         try db.write { db in
             try writeModuleAnalysis(db, analysis: analysis)
@@ -1478,6 +1469,8 @@ public final class ProjectStore: Sendable {
             t.primaryKey("session_id", .text).notNull()
                 .references("process_session", onDelete: .cascade)
             t.column("sidebar_expansion", .text).notNull().defaults(to: SidebarExpansion.expanded.rawValue)
+            t.column("modules_expansion", .text).notNull().defaults(to: SidebarExpansion.expanded.rawValue)
+            t.column("threads_expansion", .text).notNull().defaults(to: SidebarExpansion.collapsed.rawValue)
             t.column("detail_section", .text)
             t.column("last_selected_module_id", .text)
             t.column("last_selected_thread_id", .integer)
@@ -1801,6 +1794,10 @@ public final class ProjectStore: Sendable {
         let javascript = REPLLanguage.javascript.rawValue
         try addColumnIfMissing(db, table: "repl_cell", column: "language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
         try addColumnIfMissing(db, table: "notebook_entry", column: "styled_details", definition: "BLOB")
+        let expanded = SidebarExpansion.expanded.rawValue
+        let collapsed = SidebarExpansion.collapsed.rawValue
+        try addColumnIfMissing(db, table: "session_ui_state", column: "modules_expansion", definition: "TEXT NOT NULL DEFAULT '\(expanded)'")
+        try addColumnIfMissing(db, table: "session_ui_state", column: "threads_expansion", definition: "TEXT NOT NULL DEFAULT '\(collapsed)'")
         try addColumnIfMissing(db, table: "session_ui_state", column: "repl_language", definition: "TEXT NOT NULL DEFAULT '\(javascript)'")
         try addColumnIfMissing(db, table: "session_ui_state", column: "repl_draft", definition: "TEXT")
         try addColumnIfMissing(db, table: "session_ui_state", column: "repl_seek_anchor", definition: "TEXT")

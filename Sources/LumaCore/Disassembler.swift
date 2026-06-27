@@ -56,11 +56,13 @@ public final class Disassembler {
     private let reader: MemoryReader
 
     public var onAnalysisSaved: ((ModuleAnalysis) -> Void)?
+    public var onAnalysisStateChanged: ((String, ModuleAnalysisStatus) -> Void)?
 
     private var r2: R2Core!
     private var openTask: Task<Void, Never>?
     private var currentAppearance: Appearance?
     private var analyzedModules: Set<String> = []
+    private var analyzingModules: Set<String> = []
 
     public init(
         sessionID: UUID,
@@ -79,7 +81,18 @@ public final class Disassembler {
     }
 
     public func forgetModule(path: String) {
-        analyzedModules.remove(path)
+        setAnalysisStatus(.notAnalyzed, path: path)
+    }
+
+    public func analysisStatus(path: String) -> ModuleAnalysisStatus {
+        if analyzedModules.contains(path) { return .analyzed }
+        if analyzingModules.contains(path) { return .analyzing }
+        return .notAnalyzed
+    }
+
+    public func analyze(module: ProcessModule) async {
+        await ensureOpened()
+        await ensureModuleAnalyzed(module: module)
     }
 
     public func disassemble(_ request: DisassemblyRequest) async -> [DisassemblyLine] {
@@ -155,13 +168,6 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         return await fetchFunctionEnd(hex: String(address, radix: 16))
     }
 
-    public func warmUp(modules: [ProcessModule]) async {
-        await ensureOpened()
-        for module in modules {
-            await ensureModuleAnalyzed(module: module)
-        }
-    }
-
     public func currentSeek() async -> UInt64? {
         await ensureOpened()
         let raw = (await r2.cmd("?v $$").output ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -192,6 +198,7 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
 
     private func ensureModuleAnalyzed(module: ProcessModule) async {
         if analyzedModules.contains(module.path) { return }
+        setAnalysisStatus(.analyzing, path: module.path)
 
         let identity = try? await introspector.getModuleIdentity(name: module.path)
 
@@ -201,14 +208,17 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         {
             let blocksMissing = existing.functions.allSatisfy { $0.blocks.isEmpty }
             if !(blocksMissing && introspector.isAvailable) {
-                analyzedModules.insert(module.path)
+                setAnalysisStatus(.analyzed, path: module.path)
                 await replayAnalysis(existing, module: module)
                 return
             }
         }
 
-        guard introspector.isAvailable else { return }
-        analyzedModules.insert(module.path)
+        guard introspector.isAvailable else {
+            setAnalysisStatus(.notAnalyzed, path: module.path)
+            return
+        }
+        setAnalysisStatus(.analyzed, path: module.path)
 
         let ranges = (try? await introspector.enumerateModuleRanges(name: module.path)) ?? []
         let stub = ModuleAnalysis(
@@ -237,6 +247,20 @@ private func fetchFunctionEnd(hex: String) async -> UInt64? {
         onAnalysisSaved?(analysis)
 
         await applyUserInsightNames(inModule: module)
+    }
+
+    private func setAnalysisStatus(_ status: ModuleAnalysisStatus, path: String) {
+        switch status {
+        case .analyzed:
+            analyzingModules.remove(path)
+            analyzedModules.insert(path)
+        case .analyzing:
+            analyzingModules.insert(path)
+        case .notAnalyzed:
+            analyzingModules.remove(path)
+            analyzedModules.remove(path)
+        }
+        onAnalysisStateChanged?(path, status)
     }
 
     public var insightDisplayTitle: ((AddressInsight) -> String)?

@@ -51,6 +51,26 @@ struct DetailView: View {
                     .id(session.id)
                 }
 
+            case .some(.module(let sessionID, let moduleID)):
+                if let session = engine.sessions.first(where: { $0.id == sessionID }),
+                    let module = session.lastKnownModules?.first(where: { $0.id == moduleID })
+                {
+                    SessionContent(sessionID: sessionID, engine: engine) {
+                        ModuleDetailView(sessionID: sessionID, module: module, engine: engine, selection: $selection)
+                    }
+                    .id(moduleID)
+                }
+
+            case .some(.thread(let sessionID, let threadID)):
+                if let session = engine.sessions.first(where: { $0.id == sessionID }),
+                    let thread = session.lastKnownThreads?.first(where: { $0.id == threadID })
+                {
+                    SessionContent(sessionID: sessionID, engine: engine) {
+                        ThreadDetailView(sessionID: sessionID, thread: thread, engine: engine, selection: $selection)
+                    }
+                    .id(threadID)
+                }
+
             case .some(.instrument(let sessionID, let instID)),
                 .some(.instrumentComponent(let sessionID, let instID, _)):
                 if (try? engine.store.fetchInstrument(id: instID)) != nil {

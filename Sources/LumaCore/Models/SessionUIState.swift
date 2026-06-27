@@ -6,11 +6,18 @@ public enum SidebarExpansion: String, Codable, Sendable {
     case collapsed
 }
 
+public enum SessionSidebarGroup: Sendable {
+    case modules
+    case threads
+}
+
 public struct SessionUIState: Codable, Equatable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "session_ui_state"
 
     public var sessionID: UUID
     public var sidebarExpansion: SidebarExpansion
+    public var modulesExpansion: SidebarExpansion
+    public var threadsExpansion: SidebarExpansion
     public var detailSection: String?
     public var lastSelectedModuleID: String?
     public var lastSelectedThreadID: UInt?
@@ -24,6 +31,8 @@ public struct SessionUIState: Codable, Equatable, Identifiable, Sendable, Fetcha
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case sidebarExpansion = "sidebar_expansion"
+        case modulesExpansion = "modules_expansion"
+        case threadsExpansion = "threads_expansion"
         case detailSection = "detail_section"
         case lastSelectedModuleID = "last_selected_module_id"
         case lastSelectedThreadID = "last_selected_thread_id"
@@ -36,6 +45,8 @@ public struct SessionUIState: Codable, Equatable, Identifiable, Sendable, Fetcha
     public init(
         sessionID: UUID,
         sidebarExpansion: SidebarExpansion = .expanded,
+        modulesExpansion: SidebarExpansion = .expanded,
+        threadsExpansion: SidebarExpansion = .collapsed,
         detailSection: String? = nil,
         lastSelectedModuleID: String? = nil,
         lastSelectedThreadID: UInt? = nil,
@@ -46,6 +57,8 @@ public struct SessionUIState: Codable, Equatable, Identifiable, Sendable, Fetcha
     ) {
         self.sessionID = sessionID
         self.sidebarExpansion = sidebarExpansion
+        self.modulesExpansion = modulesExpansion
+        self.threadsExpansion = threadsExpansion
         self.detailSection = detailSection
         self.lastSelectedModuleID = lastSelectedModuleID
         self.lastSelectedThreadID = lastSelectedThreadID

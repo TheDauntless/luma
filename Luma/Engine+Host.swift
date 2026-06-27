@@ -22,17 +22,6 @@ extension Engine {
         return json
     }
 
-    func sessionDetailSection(for sessionID: UUID) -> SessionDetailSection {
-        guard let raw = sessionDetailSectionRaw(forSessionID: sessionID),
-            let section = SessionDetailSection(rawValue: raw)
-        else { return .summary }
-        return section
-    }
-
-    func setSessionDetailSection(sessionID: UUID, section: SessionDetailSection) {
-        setSessionDetailSection(sessionID: sessionID, section: section.rawValue)
-    }
-
     func lastSelectedModuleID(for sessionID: UUID) -> String? {
         lastSelectedModuleID(forSessionID: sessionID)
     }

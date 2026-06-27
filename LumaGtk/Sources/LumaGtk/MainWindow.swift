@@ -56,6 +56,8 @@ final class MainWindow: InstrumentUIHost {
     private var currentInsightID: UUID?
     private var currentITraceDetail: ITraceDetailView?
     private var currentITraceID: UUID?
+    private var currentModulePane: ModuleSymbolsPane?
+    private var currentThreadPane: ThreadDetailPane?
     private var sessionDetailViews: [UUID: SessionDetailView] = [:]
     private(set) lazy var sharedTracerEditor: MonacoEditor = makeSharedTracerEditor()
     private(set) lazy var sharedCodeShareEditor: MonacoEditor = makeSharedCodeShareEditor()
@@ -74,6 +76,9 @@ final class MainWindow: InstrumentUIHost {
     private var sessionChevronImages: [UUID: Gtk.Image] = [:]
     private var instrumentChildActions: [String: @MainActor () -> Void] = [:]
     private var instrumentChildKeyByComponent: [InstrumentComponentReference: String] = [:]
+    private var groupChildActions: [String: @MainActor () -> Void] = [:]
+    private var groupChevronImages: [String: Gtk.Image] = [:]
+    private var groupCountLabels: [String: Label] = [:]
 
     private struct InstrumentComponentReference: Hashable {
         let instrumentID: UUID
@@ -107,6 +112,8 @@ final class MainWindow: InstrumentUIHost {
     private enum SidebarSelection: Equatable {
         case notebook
         case session(UUID)
+        case module(sessionID: UUID, moduleID: String)
+        case thread(sessionID: UUID, threadID: UInt)
         case repl(UUID)
         case instrument(sessionID: UUID, instrumentID: UUID)
         case instrumentComponent(sessionID: UUID, instrumentID: UUID, componentID: UUID)
@@ -125,6 +132,10 @@ final class MainWindow: InstrumentUIHost {
 
     private enum SessionsRow: Equatable {
         case session(UUID)
+        case moduleGroup(UUID)
+        case moduleChild(sessionID: UUID, key: String)
+        case threadGroup(UUID)
+        case threadChild(sessionID: UUID, key: String)
         case repl(UUID)
         case instrument(sessionID: UUID, instrumentID: UUID)
         case instrumentChild(sessionID: UUID, instrumentID: UUID, key: String)
@@ -133,7 +144,13 @@ final class MainWindow: InstrumentUIHost {
 
         var sessionID: UUID {
             switch self {
-            case .session(let id), .repl(let id): return id
+            case .session(let id),
+                .moduleGroup(let id),
+                .moduleChild(let id, _),
+                .threadGroup(let id),
+                .threadChild(let id, _),
+                .repl(let id):
+                return id
             case .instrument(let id, _),
                 .instrumentChild(let id, _, _),
                 .insight(let id, _),
@@ -503,6 +520,7 @@ final class MainWindow: InstrumentUIHost {
         eventStreamPane.setInitialCollapsed(engine.projectUIState.isEventStreamCollapsed)
         applyEventStreamLayout()
         engine.onSessionListChanged = { [weak self] change in self?.handleSessionListChange(change) }
+        observeModuleAnalysis()
         engine.onREPLCellAdded = { [weak self] cell in self?.currentREPLPane?.appendCell(cell) }
         engine.onNotebookChanged = { [weak self] change in
             guard let self else { return }
@@ -1103,6 +1121,12 @@ final class MainWindow: InstrumentUIHost {
                 switch self.sessionsRowKinds[index] {
                 case .session(let id):
                     self.select(.session(id))
+                case .moduleGroup, .threadGroup:
+                    break
+                case .moduleChild(let sid, let key):
+                    self.activateGroupChild(sessionID: sid, group: .modules, key: key)
+                case .threadChild(let sid, let key):
+                    self.activateGroupChild(sessionID: sid, group: .threads, key: key)
                 case .repl(let id):
                     self.select(.repl(id))
                 case .instrument(let sid, let iid):
@@ -1725,6 +1749,12 @@ final class MainWindow: InstrumentUIHost {
             currentITraceDetail = nil
             currentITraceID = nil
         }
+        if case .module = selection {} else {
+            currentModulePane = nil
+        }
+        if case .thread = selection {} else {
+            currentThreadPane = nil
+        }
         switch selection {
         case .customInstrumentDef(let defID), .customInstrumentFile(let defID, _):
             if currentCustomInstrumentDefPane?.def.id != defID {
@@ -1768,6 +1798,30 @@ final class MainWindow: InstrumentUIHost {
                     icon: "computer-symbolic",
                     title: "Session unavailable",
                     subtitle: "This session is no longer in the store."
+                )
+            }
+        case .module(let sid, let moduleID):
+            if let engine, let module = sessionModules(sid).first(where: { $0.id == moduleID }) {
+                let pane = ModuleSymbolsPane(engine: engine, sessionID: sid, module: module)
+                currentModulePane = pane
+                widget = pane.widget
+            } else {
+                widget = MainWindow.makeEmptyState(
+                    icon: "package-x-generic-symbolic",
+                    title: "Module unavailable",
+                    subtitle: "This module is no longer loaded."
+                )
+            }
+        case .thread(let sid, let threadID):
+            if let engine, let thread = sessionThreads(sid).first(where: { $0.id == threadID }) {
+                let pane = ThreadDetailPane(engine: engine, sessionID: sid, thread: thread)
+                currentThreadPane = pane
+                widget = pane.widget
+            } else {
+                widget = MainWindow.makeEmptyState(
+                    icon: "cpu-symbolic",
+                    title: "Thread unavailable",
+                    subtitle: "This thread is no longer running."
                 )
             }
         case .repl(let id):
@@ -1907,7 +1961,9 @@ final class MainWindow: InstrumentUIHost {
         switch selection {
         case .session(let id), .repl(let id):
             return id
-        case .instrument(let id, _),
+        case .module(let id, _),
+            .thread(let id, _),
+            .instrument(let id, _),
             .instrumentComponent(let id, _, _),
             .insight(let id, _),
             .itrace(let id, _):
@@ -2198,6 +2254,22 @@ final class MainWindow: InstrumentUIHost {
         }
     }
 
+    func navigateToModule(sessionID: UUID, moduleID: String) {
+        expandSessionIfCollapsed(sessionID)
+        select(.module(sessionID: sessionID, moduleID: moduleID))
+    }
+
+    func navigateToThread(sessionID: UUID, threadID: UInt) {
+        expandSessionIfCollapsed(sessionID)
+        select(.thread(sessionID: sessionID, threadID: threadID))
+    }
+
+    private func expandSessionIfCollapsed(_ sessionID: UUID) {
+        if let engine, engine.sidebarExpansion(forSessionID: sessionID) == .collapsed {
+            setSessionExpansion(sessionID: sessionID, .expanded)
+        }
+    }
+
     private func instrumentComponentExistsInSidebar(sessionID: UUID, instrumentID: UUID, componentID: UUID) -> Bool {
         instrumentChildKeyByComponent[
             InstrumentComponentReference(instrumentID: instrumentID, componentID: componentID)
@@ -2223,7 +2295,7 @@ final class MainWindow: InstrumentUIHost {
             customInstrumentsList.unselectAll()
             missionsListBox.unselectAll()
             notebookListBox.select(row: notebookRow)
-        case .session, .repl, .instrument, .instrumentComponent, .insight, .itrace:
+        case .session, .module, .thread, .repl, .instrument, .instrumentComponent, .insight, .itrace:
             notebookListBox.unselectAll()
             packagesList.unselectAll()
             customInstrumentsList.unselectAll()
@@ -2319,6 +2391,8 @@ final class MainWindow: InstrumentUIHost {
             currentInstrumentDetail?.applySessionState()
             currentInsightDetail?.applySessionState()
             sessionDetailViews[session.id]?.applySessionState()
+            reconcileGroupChildren(sessionID: session.id, group: .modules)
+            reconcileGroupChildren(sessionID: session.id, group: .threads)
             updateResumeButtonVisibility()
         case .sessionRemoved(let id):
             removeSessionRows(id)
@@ -2340,8 +2414,15 @@ final class MainWindow: InstrumentUIHost {
             sessionArmIcons.removeValue(forKey: id)
             sessionDetachedHosts.removeValue(forKey: id)
             sessionChevronImages.removeValue(forKey: id)
+            for group in [SessionSidebarGroup.modules, .threads] {
+                groupChevronImages.removeValue(forKey: groupKey(sessionID: id, group: group))
+                groupCountLabels.removeValue(forKey: groupKey(sessionID: id, group: group))
+            }
+            groupChildActions = groupChildActions.filter { !$0.key.hasPrefix(id.uuidString) }
             switch selection {
             case .session(let sid),
+                .module(let sid, _),
+                .thread(let sid, _),
                 .repl(let sid),
                 .instrument(let sid, _),
                 .instrumentComponent(let sid, _, _),
@@ -2474,6 +2555,8 @@ final class MainWindow: InstrumentUIHost {
         sessionsList.insert(child: headerRow, position: pos)
         sessionsRowKinds.insert(.session(session.id), at: pos)
 
+        insertGroupHeaders(session: session)
+
         let replRow = ListBoxRow()
         let (replBox, replIconHost) = MainWindow.makeChildRowBox()
         let replIcon = Gtk.Image(iconName: "utilities-terminal-symbolic")
@@ -2484,9 +2567,10 @@ final class MainWindow: InstrumentUIHost {
         replLabel.halign = .start
         replBox.append(child: replLabel)
         replRow.set(child: replBox)
-        replRow.visible = expansion == .expanded
-        sessionsList.insert(child: replRow, position: pos + 1)
-        sessionsRowKinds.insert(.repl(session.id), at: pos + 1)
+        insertChildRow(replRow, kind: .repl(session.id), sessionID: session.id)
+
+        reconcileGroupChildren(sessionID: session.id, group: .modules)
+        reconcileGroupChildren(sessionID: session.id, group: .threads)
     }
 
     private func makeSessionChevron(
@@ -2575,10 +2659,12 @@ final class MainWindow: InstrumentUIHost {
         let kindOrder: (SessionsRow) -> Int = { k in
             switch k {
             case .session: return 0
-            case .repl: return 1
-            case .instrument, .instrumentChild: return 2
-            case .insight: return 3
-            case .itrace: return 4
+            case .moduleGroup, .moduleChild: return 1
+            case .threadGroup, .threadChild: return 2
+            case .repl: return 3
+            case .instrument, .instrumentChild: return 4
+            case .insight: return 5
+            case .itrace: return 6
             }
         }
         let target = kindOrder(kind)
@@ -2685,6 +2771,317 @@ final class MainWindow: InstrumentUIHost {
 
     private func instrumentChildActionKey(instrumentID: UUID, key: String) -> String {
         "\(instrumentID.uuidString)/\(key)"
+    }
+
+    private func insertGroupHeaders(session: LumaCore.ProcessSession) {
+        let moduleHeader = makeGroupHeaderRow(
+            sessionID: session.id, group: .modules, title: "Modules", iconName: "package-x-generic-symbolic")
+        insertChildRow(moduleHeader, kind: .moduleGroup(session.id), sessionID: session.id)
+        let threadHeader = makeGroupHeaderRow(
+            sessionID: session.id, group: .threads, title: "Threads", iconName: "cpu-symbolic")
+        insertChildRow(threadHeader, kind: .threadGroup(session.id), sessionID: session.id)
+    }
+
+    private func makeGroupHeaderRow(
+        sessionID: UUID,
+        group: SessionSidebarGroup,
+        title: String,
+        iconName: String
+    ) -> ListBoxRow {
+        let row = ListBoxRow()
+        row.selectable = false
+
+        let box = Box(orientation: .horizontal, spacing: 0)
+        box.halign = .start
+        box.marginStart = MainWindow.sidebarRowLeadingPad
+        box.marginEnd = 12
+        box.marginTop = 2
+        box.marginBottom = 2
+
+        let expansion = engine?.sidebarExpansion(forSessionID: sessionID, group: group) ?? .expanded
+        let chevron = makeSessionChevron(expansion: expansion) { [weak self] in
+            self?.toggleGroupExpansion(sessionID: sessionID, group: group)
+        }
+        chevron.button.setSizeRequest(width: MainWindow.sidebarChevronColumnWidth, height: -1)
+        chevron.button.marginEnd = MainWindow.sidebarChevronToIconSpacing
+        box.append(child: chevron.button)
+        groupChevronImages[groupKey(sessionID: sessionID, group: group)] = chevron.image
+
+        let iconColumnSpacer = Box(orientation: .horizontal, spacing: 0)
+        iconColumnSpacer.setSizeRequest(width: MainWindow.sidebarIconColumnWidth, height: -1)
+        box.append(child: iconColumnSpacer)
+
+        let iconHost = MainWindow.makeChildIconHost()
+        iconHost.marginEnd = MainWindow.sidebarIconToLabelSpacing
+        let icon = Gtk.Image(iconName: iconName)
+        icon.pixelSize = 16
+        MainWindow.centerInIconHost(icon)
+        iconHost.append(child: icon)
+        box.append(child: iconHost)
+
+        let label = Label(str: title)
+        label.halign = .start
+        box.append(child: label)
+
+        let countLabel = Label(str: groupCountText(sessionID: sessionID, group: group))
+        countLabel.halign = .start
+        countLabel.marginStart = 6
+        countLabel.add(cssClass: "dim-label")
+        box.append(child: countLabel)
+        groupCountLabels[groupKey(sessionID: sessionID, group: group)] = countLabel
+
+        row.set(child: box)
+        return row
+    }
+
+    private func reconcileGroupChildren(sessionID: UUID, group: SessionSidebarGroup) {
+        let outerGuard = isReconcilingSidebar
+        isReconcilingSidebar = true
+        defer {
+            if !outerGuard {
+                isReconcilingSidebar = false
+                restoreSidebarSelectionVisual()
+            }
+        }
+
+        removeGroupChildRows(sessionID: sessionID, group: group)
+        groupCountLabels[groupKey(sessionID: sessionID, group: group)]?.label =
+            groupCountText(sessionID: sessionID, group: group)
+        guard let headerIndex = groupHeaderIndex(sessionID: sessionID, group: group) else { return }
+
+        var insertAt = headerIndex + 1
+        for child in makeGroupChildren(sessionID: sessionID, group: group) {
+            let kind: SessionsRow = group == .modules
+                ? .moduleChild(sessionID: sessionID, key: child.key)
+                : .threadChild(sessionID: sessionID, key: child.key)
+            child.row.visible = isRowVisible(kind)
+            sessionsList.insert(child: child.row, position: insertAt)
+            sessionsRowKinds.insert(kind, at: insertAt)
+            groupChildActions[groupChildActionKey(sessionID: sessionID, group: group, key: child.key)] = child.onActivate
+            insertAt += 1
+        }
+    }
+
+    private func makeGroupChildren(
+        sessionID: UUID,
+        group: SessionSidebarGroup
+    ) -> [(key: String, row: ListBoxRow, onActivate: @MainActor () -> Void)] {
+        guard let engine else { return [] }
+        switch group {
+        case .modules:
+            return makeModuleChildren(sessionID: sessionID, engine: engine)
+        case .threads:
+            return makeThreadChildren(sessionID: sessionID, engine: engine)
+        }
+    }
+
+    private func makeModuleChildren(
+        sessionID: UUID,
+        engine: Engine
+    ) -> [(key: String, row: ListBoxRow, onActivate: @MainActor () -> Void)] {
+        let modules = sessionModules(sessionID)
+        let highlights = modules.sidebarHighlights(
+            mainModule: sessionMainModule(sessionID), selectedID: selectedModuleID(in: sessionID))
+        var children: [(key: String, row: ListBoxRow, onActivate: @MainActor () -> Void)] = []
+        for module in highlights {
+            let status = engine.moduleAnalysisStatus(sessionID: sessionID, modulePath: module.path)
+            let (row, anchor) = ModuleSidebar.makeModuleRow(module: module, status: status)
+            ModuleSidebar.attachContextMenu(to: anchor, module: module, engine: engine, sessionID: sessionID)
+            let moduleID = module.id
+            children.append((
+                key: moduleChildKey(moduleID: moduleID),
+                row: row,
+                onActivate: { [weak self] in self?.navigateToModule(sessionID: sessionID, moduleID: moduleID) }
+            ))
+        }
+        if modules.count > highlights.count {
+            let (row, anchor) = SidebarFeatureRow.makeBrowseAll(totalCount: modules.count)
+            children.append((
+                key: "browse",
+                row: row,
+                onActivate: { [weak self] in
+                    ModuleSidebar.presentBrowser(modules: modules, anchor: anchor) { module in
+                        self?.navigateToModule(sessionID: sessionID, moduleID: module.id)
+                    }
+                }
+            ))
+        }
+        return children
+    }
+
+    private func makeThreadChildren(
+        sessionID: UUID,
+        engine: Engine
+    ) -> [(key: String, row: ListBoxRow, onActivate: @MainActor () -> Void)] {
+        let threads = sessionThreads(sessionID)
+        let highlights = threads.sidebarHighlights(selectedID: selectedThreadID(in: sessionID))
+        var children: [(key: String, row: ListBoxRow, onActivate: @MainActor () -> Void)] = []
+        for thread in highlights {
+            let (row, anchor) = ThreadSidebar.makeThreadRow(thread: thread)
+            ThreadSidebar.attachContextMenu(to: anchor, thread: thread, engine: engine, sessionID: sessionID)
+            let threadID = thread.id
+            children.append((
+                key: threadChildKey(threadID: threadID),
+                row: row,
+                onActivate: { [weak self] in self?.navigateToThread(sessionID: sessionID, threadID: threadID) }
+            ))
+        }
+        if threads.count > highlights.count {
+            let (row, anchor) = SidebarFeatureRow.makeBrowseAll(totalCount: threads.count)
+            children.append((
+                key: "browse",
+                row: row,
+                onActivate: { [weak self] in
+                    ThreadSidebar.presentBrowser(threads: threads, anchor: anchor) { thread in
+                        self?.navigateToThread(sessionID: sessionID, threadID: thread.id)
+                    }
+                }
+            ))
+        }
+        return children
+    }
+
+    private func removeGroupChildRows(sessionID: UUID, group: SessionSidebarGroup) {
+        var index = 0
+        while index < sessionsRowKinds.count {
+            if let key = groupChildKey(sessionsRowKinds[index], sessionID: sessionID, group: group) {
+                if let row = sessionsList.getRowAt(index: index) {
+                    sessionsList.remove(child: row)
+                }
+                sessionsRowKinds.remove(at: index)
+                groupChildActions.removeValue(forKey: groupChildActionKey(sessionID: sessionID, group: group, key: key))
+            } else {
+                index += 1
+            }
+        }
+    }
+
+    private func groupChildKey(_ kind: SessionsRow, sessionID: UUID, group: SessionSidebarGroup) -> String? {
+        switch (group, kind) {
+        case (.modules, .moduleChild(let sid, let key)) where sid == sessionID:
+            return key
+        case (.threads, .threadChild(let sid, let key)) where sid == sessionID:
+            return key
+        default:
+            return nil
+        }
+    }
+
+    private func groupHeaderIndex(sessionID: UUID, group: SessionSidebarGroup) -> Int? {
+        sessionsRowKinds.firstIndex {
+            switch (group, $0) {
+            case (.modules, .moduleGroup(let sid)): return sid == sessionID
+            case (.threads, .threadGroup(let sid)): return sid == sessionID
+            default: return false
+            }
+        }
+    }
+
+    private func activateGroupChild(sessionID: UUID, group: SessionSidebarGroup, key: String) {
+        groupChildActions[groupChildActionKey(sessionID: sessionID, group: group, key: key)]?()
+    }
+
+    private func toggleGroupExpansion(sessionID: UUID, group: SessionSidebarGroup) {
+        guard let engine else { return }
+        let current = engine.sidebarExpansion(forSessionID: sessionID, group: group)
+        setGroupExpansion(sessionID: sessionID, group: group, current == .expanded ? .collapsed : .expanded)
+    }
+
+    private func setGroupExpansion(sessionID: UUID, group: SessionSidebarGroup, _ expansion: SidebarExpansion) {
+        guard let engine else { return }
+        engine.setSidebarExpansion(sessionID: sessionID, group: group, expansion)
+        groupChevronImages[groupKey(sessionID: sessionID, group: group)]?.setFrom(iconName: chevronIconName(for: expansion))
+        for (index, kind) in sessionsRowKinds.enumerated() {
+            guard groupChildKey(kind, sessionID: sessionID, group: group) != nil,
+                let row = sessionsList.getRowAt(index: index)
+            else { continue }
+            row.visible = isRowVisible(kind)
+        }
+    }
+
+    private func isRowVisible(_ kind: SessionsRow) -> Bool {
+        guard let engine else { return true }
+        if case .session = kind { return true }
+        guard engine.sidebarExpansion(forSessionID: kind.sessionID) == .expanded else { return false }
+        switch kind {
+        case .moduleChild(let sid, _):
+            return engine.sidebarExpansion(forSessionID: sid, group: .modules) == .expanded
+        case .threadChild(let sid, _):
+            return engine.sidebarExpansion(forSessionID: sid, group: .threads) == .expanded
+        default:
+            return true
+        }
+    }
+
+    private func groupCountText(sessionID: UUID, group: SessionSidebarGroup) -> String {
+        let count: Int
+        switch group {
+        case .modules: count = sessionModules(sessionID).count
+        case .threads: count = sessionThreads(sessionID).count
+        }
+        return count > 0 ? "(\(count))" : ""
+    }
+
+    private func sessionModules(_ sessionID: UUID) -> [LumaCore.ProcessModule] {
+        if let node = engine?.node(forSessionID: sessionID), !node.modules.isEmpty {
+            return node.modules
+        }
+        return engine?.session(id: sessionID)?.lastKnownModules ?? []
+    }
+
+    private func sessionThreads(_ sessionID: UUID) -> [LumaCore.ProcessThread] {
+        if let node = engine?.node(forSessionID: sessionID), !node.threads.isEmpty {
+            return node.threads
+        }
+        return engine?.session(id: sessionID)?.lastKnownThreads ?? []
+    }
+
+    private func sessionMainModule(_ sessionID: UUID) -> LumaCore.ProcessModule? {
+        engine?.session(id: sessionID)?.lastKnownMainModule ?? engine?.node(forSessionID: sessionID)?.mainModule
+    }
+
+    private func selectedModuleID(in sessionID: UUID) -> String? {
+        guard case .module(let sid, let moduleID) = selection, sid == sessionID else { return nil }
+        return moduleID
+    }
+
+    private func selectedThreadID(in sessionID: UUID) -> UInt? {
+        guard case .thread(let sid, let threadID) = selection, sid == sessionID else { return nil }
+        return threadID
+    }
+
+    private func moduleChildKey(moduleID: String) -> String { "module:\(moduleID)" }
+
+    private func threadChildKey(threadID: UInt) -> String { "thread:\(threadID)" }
+
+    private func groupKey(sessionID: UUID, group: SessionSidebarGroup) -> String {
+        "\(sessionID.uuidString)/\(groupToken(group))"
+    }
+
+    private func groupChildActionKey(sessionID: UUID, group: SessionSidebarGroup, key: String) -> String {
+        "\(sessionID.uuidString)/\(groupToken(group))/\(key)"
+    }
+
+    private func groupToken(_ group: SessionSidebarGroup) -> String {
+        switch group {
+        case .modules: return "modules"
+        case .threads: return "threads"
+        }
+    }
+
+    private func observeModuleAnalysis() {
+        guard let engine else { return }
+        withObservationTracking {
+            _ = engine.moduleAnalysisStatuses
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                for session in self.sessions {
+                    self.reconcileGroupChildren(sessionID: session.id, group: .modules)
+                }
+                self.observeModuleAnalysis()
+            }
+        }
     }
 
     private static let sidebarRowLeadingPad = 3
@@ -3269,6 +3666,18 @@ final class MainWindow: InstrumentUIHost {
         case .session(let id):
             return sessionsRowKinds.firstIndex {
                 if case .session(let s) = $0 { return s == id }
+                return false
+            }
+        case .module(let sid, let moduleID):
+            let key = moduleChildKey(moduleID: moduleID)
+            return sessionsRowKinds.firstIndex {
+                if case .moduleChild(let s, let k) = $0 { return s == sid && k == key }
+                return false
+            }
+        case .thread(let sid, let threadID):
+            let key = threadChildKey(threadID: threadID)
+            return sessionsRowKinds.firstIndex {
+                if case .threadChild(let s, let k) = $0 { return s == sid && k == key }
                 return false
             }
         case .repl(let id):

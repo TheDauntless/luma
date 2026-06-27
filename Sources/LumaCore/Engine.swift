@@ -67,7 +67,7 @@ public final class Engine {
     public let customInstruments: CustomInstrumentLibrary
 
     @ObservationIgnored private var disassemblers: [UUID: Disassembler] = [:]
-    @ObservationIgnored private var prewarmedSessions: Set<UUID> = []
+    @ObservationIgnored private var seekRestoredSessions: Set<UUID> = []
     @ObservationIgnored private var memoryReaders: [UUID: CachingMemoryReader] = [:]
 
     public let collaboration: CollaborationSession
@@ -81,6 +81,7 @@ public final class Engine {
     public private(set) var instrumentsBySession: [UUID: [InstrumentInstance]] = [:]
     public private(set) var insightsBySession: [UUID: [AddressInsight]] = [:]
     public private(set) var tracesBySession: [UUID: [ITrace]] = [:]
+    public private(set) var moduleAnalysisStatuses: [UUID: [String: ModuleAnalysisStatus]] = [:]
     public internal(set) var projectUIState: ProjectUIState = ProjectUIState()
     public internal(set) var sessionUIStates: [UUID: SessionUIState] = [:]
     public internal(set) var customInstrumentDefUIStates: [UUID: CustomInstrumentDefUIState] = [:]
@@ -2478,8 +2479,22 @@ public final class Engine {
         d.insightDisplayTitle = { [weak self] insight in
             self?.displayTitle(for: insight) ?? insight.anchor.displayString
         }
+        d.onAnalysisStateChanged = { [weak self] path, status in
+            self?.moduleAnalysisStatuses[sessionID, default: [:]][path] = status
+        }
         disassemblers[sessionID] = d
         return d
+    }
+
+    public func moduleAnalysisStatus(sessionID: UUID, modulePath: String) -> ModuleAnalysisStatus {
+        moduleAnalysisStatuses[sessionID]?[modulePath] ?? .notAnalyzed
+    }
+
+    public func analyzeModule(sessionID: UUID, module: ProcessModule) {
+        guard let disassembler = disassembler(forSessionID: sessionID) else { return }
+        Task { @MainActor in
+            await disassembler.analyze(module: module)
+        }
     }
 
     private func radare2REPLValue(forCommand command: String, sessionID: UUID) async -> REPLResult.Value {
@@ -2660,18 +2675,13 @@ public final class Engine {
         return output.isEmpty ? messages : output + "\n" + messages
     }
 
-    private func prewarmSession(sessionID: UUID) {
-        guard prewarmedSessions.insert(sessionID).inserted else { return }
+    private func restoreReplSeek(sessionID: UUID) {
+        guard seekRestoredSessions.insert(sessionID).inserted else { return }
         guard let disassembler = disassembler(forSessionID: sessionID) else { return }
-
-        let analyzedPaths = Set((try? store.fetchAnalyzedModulePaths(sessionID: sessionID)) ?? [])
-        let modules = modulesSnapshot(forSessionID: sessionID).filter { analyzedPaths.contains($0.path) }
-        let seekAnchor = replSeekAnchor(forSessionID: sessionID)
-        guard !modules.isEmpty || seekAnchor != nil else { return }
+        guard let seekAnchor = replSeekAnchor(forSessionID: sessionID) else { return }
 
         Task(priority: .utility) { @MainActor in
-            await disassembler.warmUp(modules: modules)
-            if let seekAnchor, let address = await self.resolve(sessionID: sessionID, anchor: seekAnchor) {
+            if let address = await self.resolve(sessionID: sessionID, anchor: seekAnchor) {
                 await disassembler.seek(to: address)
             }
         }
@@ -5263,7 +5273,7 @@ public func deleteCustomInstrument(_ defID: UUID) async {
                     session.lastKnownModules = delta.applied(to: session.lastKnownModules)
                 }
                 self?.rebuildAddressAnnotations(sessionID: sessionID)
-                self?.prewarmSession(sessionID: sessionID)
+                self?.restoreReplSeek(sessionID: sessionID)
                 if let sid = self?.collabSessionID(forNode: node) {
                     self?.collaboration.enqueueUpdateSessionModules(sessionID: sid, delta: delta)
                 }

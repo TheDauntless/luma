@@ -17,39 +17,8 @@ final class SessionDetailView {
     private let bannerSlot: Box
     private var currentBanner: Widget?
     private let titleLabel: Label
-    private let sectionBar: Box
-    private let summaryButton: ToggleButton
-    private let modulesButton: ToggleButton
-    private let threadsButton: ToggleButton
-    private let contentSlot: Box
-
-    private let summaryPane: Box
     private let summaryBox: Box
     private var summaryKeyGroup: SizeGroup
-
-    private let modulesPane: Paned
-    private let modulesList: ListBox
-    private let moduleDetailContainer: Box
-    private var moduleDetail: ModuleSymbolsPane?
-
-    private let threadsPane: Paned
-    private let threadsList: ListBox
-    private let threadDetailContainer: Box
-    private var threadDetail: ThreadDetailPane?
-
-    private var modulesTask: Task<Void, Never>?
-    private var threadsTask: Task<Void, Never>?
-    private var lastNodeAvailable: Bool = false
-
-    private var currentSortedModules: [LumaCore.ProcessModule] = []
-    private var currentSortedThreads: [LumaCore.ProcessThread] = []
-
-    private enum Section {
-        case summary
-        case modules
-        case threads
-    }
-    private var section: Section = .summary
 
     init(engine: Engine, session: LumaCore.ProcessSession) {
         self.engine = engine
@@ -73,29 +42,6 @@ final class SessionDetailView {
         titleLabel.halign = .start
         titleLabel.add(cssClass: "title-2")
 
-        summaryButton = ToggleButton()
-        summaryButton.label = "Summary"
-        summaryButton.active = true
-
-        modulesButton = ToggleButton()
-        modulesButton.label = "Modules"
-        modulesButton.set(group: summaryButton)
-
-        threadsButton = ToggleButton()
-        threadsButton.label = "Threads"
-        threadsButton.set(group: summaryButton)
-
-        sectionBar = Box(orientation: .horizontal, spacing: 0)
-        sectionBar.add(cssClass: "linked")
-        sectionBar.halign = .start
-        sectionBar.append(child: summaryButton)
-        sectionBar.append(child: modulesButton)
-        sectionBar.append(child: threadsButton)
-
-        contentSlot = Box(orientation: .vertical, spacing: 0)
-        contentSlot.hexpand = true
-        contentSlot.vexpand = true
-
         summaryBox = Box(orientation: .vertical, spacing: 4)
         summaryBox.halign = .start
         summaryKeyGroup = SizeGroup(mode: .horizontal)
@@ -104,120 +50,15 @@ final class SessionDetailView {
         summaryScroll.hexpand = true
         summaryScroll.vexpand = true
         summaryScroll.set(child: summaryBox)
-        summaryPane = Box(orientation: .vertical, spacing: 0)
-        summaryPane.hexpand = true
-        summaryPane.vexpand = true
-        summaryPane.append(child: summaryScroll)
-
-        modulesList = ListBox()
-        modulesList.selectionMode = .single
-        modulesList.add(cssClass: "boxed-list")
-        let modulesScroll = ScrolledWindow()
-        modulesScroll.hexpand = true
-        modulesScroll.vexpand = true
-        modulesScroll.set(child: modulesList)
-
-        moduleDetailContainer = Box(orientation: .vertical, spacing: 0)
-        moduleDetailContainer.hexpand = true
-        moduleDetailContainer.vexpand = true
-
-        modulesPane = Paned(orientation: .horizontal)
-        modulesPane.startChild = WidgetRef(modulesScroll)
-        modulesPane.endChild = WidgetRef(moduleDetailContainer)
-        modulesPane.position = 360
-        modulesPane.resizeStartChild = true
-        modulesPane.resizeEndChild = true
-        modulesPane.shrinkStartChild = false
-        modulesPane.shrinkEndChild = false
-        modulesPane.hexpand = true
-        modulesPane.vexpand = true
-
-        threadsList = ListBox()
-        threadsList.selectionMode = .single
-        threadsList.add(cssClass: "boxed-list")
-        let threadsScroll = ScrolledWindow()
-        threadsScroll.hexpand = true
-        threadsScroll.vexpand = true
-        threadsScroll.set(child: threadsList)
-
-        threadDetailContainer = Box(orientation: .vertical, spacing: 0)
-        threadDetailContainer.hexpand = true
-        threadDetailContainer.vexpand = true
-
-        threadsPane = Paned(orientation: .horizontal)
-        threadsPane.startChild = WidgetRef(threadsScroll)
-        threadsPane.endChild = WidgetRef(threadDetailContainer)
-        threadsPane.position = 260
-        threadsPane.resizeStartChild = false
-        threadsPane.resizeEndChild = true
-        threadsPane.shrinkStartChild = false
-        threadsPane.shrinkEndChild = false
-        threadsPane.hexpand = true
-        threadsPane.vexpand = true
 
         body.append(child: titleLabel)
-        body.append(child: sectionBar)
-        body.append(child: contentSlot)
+        body.append(child: summaryScroll)
 
         widget.append(child: bannerSlot)
         widget.append(child: body)
 
         rebuildSummary(session: session)
-        showSection(.summary)
         applyBanner(for: session)
-        observeNode()
-
-        summaryButton.onToggled { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.summaryButton.active else { return }
-                self.showSection(.summary)
-            }
-        }
-        modulesButton.onToggled { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.modulesButton.active else { return }
-                self.showSection(.modules)
-            }
-        }
-        threadsButton.onToggled { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.threadsButton.active else { return }
-                self.showSection(.threads)
-            }
-        }
-
-        modulesList.onRowSelected { [weak self] _, row in
-            MainActor.assumeIsolated {
-                guard let self, let row else { return }
-                let index = Int(row.index)
-                guard index >= 0, index < self.currentSortedModules.count else { return }
-                self.showModuleDetail(self.currentSortedModules[index])
-            }
-        }
-
-        threadsList.onRowSelected { [weak self] _, row in
-            MainActor.assumeIsolated {
-                guard let self, let row else { return }
-                let index = Int(row.index)
-                guard index >= 0, index < self.currentSortedThreads.count else { return }
-                self.showThreadDetail(self.currentSortedThreads[index])
-            }
-        }
-    }
-
-    deinit {
-        modulesTask?.cancel()
-        threadsTask?.cancel()
-    }
-
-    private func showSection(_ next: Section) {
-        section = next
-        clearBox(contentSlot)
-        switch next {
-        case .summary: contentSlot.append(child: summaryPane)
-        case .modules: contentSlot.append(child: modulesPane)
-        case .threads: contentSlot.append(child: threadsPane)
-        }
     }
 
     func applySessionState() {
@@ -225,14 +66,6 @@ final class SessionDetailView {
         titleLabel.label = session.processName
         rebuildSummary(session: session)
         applyBanner(for: session)
-
-        let node = engine?.node(forSessionID: sessionID)
-        if (node != nil) != lastNodeAvailable {
-            observeNode()
-        } else if let node {
-            renderModules(node.modules)
-            renderThreads(currentThreads(of: node))
-        }
     }
 
     private func applyBanner(for session: LumaCore.ProcessSession) {
@@ -263,44 +96,6 @@ final class SessionDetailView {
     private func resumeGating(for id: UUID) {
         guard let engine else { return }
         Task { @MainActor in await engine.resumeGating(forSessionID: id) }
-    }
-
-    private func observeNode() {
-        modulesTask?.cancel()
-        threadsTask?.cancel()
-        modulesTask = nil
-        threadsTask = nil
-
-        guard let node = engine?.node(forSessionID: sessionID) else {
-            lastNodeAvailable = false
-            renderModules([])
-            renderThreads(persistedThreads())
-            return
-        }
-        lastNodeAvailable = true
-
-        renderModules(node.modules)
-        renderThreads(currentThreads(of: node))
-
-        modulesTask = Task { @MainActor [weak self, weak node] in
-            guard let node else { return }
-            for await _ in node.moduleDeltas {
-                self?.renderModules(node.modules)
-            }
-        }
-
-        threadsTask = Task { @MainActor [weak self, weak node] in
-            guard let node else { return }
-            for await _ in node.threadDeltas {
-                guard let self else { continue }
-                self.renderThreads(self.currentThreads(of: node))
-            }
-        }
-    }
-
-    private func currentThreads(of node: LumaCore.ProcessNode) -> [LumaCore.ProcessThread] {
-        let live = node.threads
-        return live.isEmpty ? persistedThreads() : live
     }
 
     private func rebuildSummary(session: LumaCore.ProcessSession) {
@@ -391,138 +186,11 @@ final class SessionDetailView {
         summaryBox.append(child: row)
     }
 
-    private func renderModules(_ modules: [LumaCore.ProcessModule]) {
-        let sorted = modules.sortedByOrigin()
-        currentSortedModules = sorted
-        modulesButton.label = "Modules (\(modules.count))"
-        clearListBox(modulesList)
-
-        if modules.isEmpty {
-            modulesList.append(child: makeEmptyRow(text: "No modules loaded."))
-            clearBox(moduleDetailContainer)
-            return
-        }
-
-        for module in sorted {
-            let row = Adw.ActionRow()
-            let title = StyledTextPango.escape(module.name)
-            row.set(title: module.isSystemModule ? title : "<b>\(title)</b>")
-            row.set(subtitle: String(format: "0x%llx · %@ bytes", module.base, formatNumber(module.size)))
-            modulesList.append(child: row)
-            attachModuleContextMenu(to: row, module: module)
-        }
-    }
-
-    private func renderThreads(_ threads: [LumaCore.ProcessThread]) {
-        let sorted = threads.sorted(by: { $0.id < $1.id })
-        currentSortedThreads = sorted
-        threadsButton.label = "Threads (\(threads.count))"
-        clearListBox(threadsList)
-
-        if threads.isEmpty {
-            threadsList.append(child: makeEmptyRow(text: "No threads observed."))
-            clearBox(threadDetailContainer)
-            return
-        }
-
-        for thread in sorted {
-            let row = Adw.ActionRow()
-            row.set(title: thread.name ?? "tid \(thread.id)")
-            var subtitle = "tid \(thread.id)"
-            if let entry = thread.entrypoint {
-                subtitle += String(format: " · entry 0x%llx", entry.routine)
-            }
-            row.set(subtitle: subtitle)
-            threadsList.append(child: row)
-            attachThreadContextMenu(to: row, thread: thread)
-        }
-    }
-
-    private func showModuleDetail(_ module: LumaCore.ProcessModule) {
-        clearBox(moduleDetailContainer)
-        guard let engine else { return }
-        let pane = ModuleSymbolsPane(engine: engine, sessionID: sessionID, module: module)
-        moduleDetail = pane
-        moduleDetailContainer.append(child: pane.widget)
-    }
-
-    private func showThreadDetail(_ thread: LumaCore.ProcessThread) {
-        clearBox(threadDetailContainer)
-        guard let engine else { return }
-        let pane = ThreadDetailPane(engine: engine, sessionID: sessionID, thread: thread)
-        threadDetail = pane
-        threadDetailContainer.append(child: pane.widget)
-    }
-
-    private func attachModuleContextMenu(to anchor: Widget, module: LumaCore.ProcessModule) {
-        guard let engine else { return }
-        AddressActionMenu.attach(
-            to: anchor, engine: engine, sessionID: sessionID, address: module.base,
-            value: String(format: "0x%llx", module.base))
-    }
-
-    private func attachThreadContextMenu(to anchor: Widget, thread: LumaCore.ProcessThread) {
-        guard let engine else { return }
-        let actions = engine.threadActions(sessionID: sessionID, thread: thread)
-        guard !actions.isEmpty else { return }
-
-        let gesture = GestureClick()
-        gesture.set(button: 3)
-        gesture.propagationPhase = GTK_PHASE_CAPTURE
-        gesture.onPressed { [anchor] _, _, x, y in
-            MainActor.assumeIsolated {
-                let items: [ContextMenu.Item] = actions.map { action in
-                    ContextMenu.Item(action.title, destructive: action.role == .destructive) {
-                        Task { @MainActor in
-                            if let target = await action.perform() {
-                                AddressActionMenu.navigateToTarget?(target)
-                            }
-                        }
-                    }
-                }
-                ContextMenu.present([items], at: anchor, x: x, y: y)
-            }
-        }
-        anchor.install(controller: gesture)
-    }
-
-    private func makeEmptyRow(text: String) -> ListBoxRow {
-        let row = ListBoxRow()
-        row.selectable = false
-        let label = Label(str: text)
-        label.halign = .start
-        label.marginStart = 12
-        label.marginEnd = 12
-        label.marginTop = 8
-        label.marginBottom = 8
-        label.add(cssClass: "dim-label")
-        row.set(child: label)
-        return row
-    }
-
-    private func clearListBox(_ list: ListBox) {
-        var child = list.firstChild
-        while let current = child {
-            child = current.nextSibling
-            list.remove(child: current)
-        }
-    }
-
     private func clearBox(_ box: Box) {
         var child = box.firstChild
         while let current = child {
             child = current.nextSibling
             box.remove(child: current)
         }
-    }
-
-    private func persistedThreads() -> [LumaCore.ProcessThread] {
-        engine?.session(id: sessionID)?.lastKnownThreads ?? []
-    }
-
-    private func formatNumber(_ value: UInt64) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 }

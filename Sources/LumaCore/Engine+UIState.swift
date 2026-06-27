@@ -53,8 +53,13 @@ extension Engine {
         }
     }
 
-    public func setSessionDetailSection(sessionID: UUID, section: String?) {
-        mutateSessionUIState(sessionID: sessionID) { $0.detailSection = section }
+    public func setSidebarExpansion(sessionID: UUID, group: SessionSidebarGroup, _ expansion: SidebarExpansion) {
+        mutateSessionUIState(sessionID: sessionID) { state in
+            switch group {
+            case .modules: state.modulesExpansion = expansion
+            case .threads: state.threadsExpansion = expansion
+            }
+        }
     }
 
     public func setLastSelectedModuleID(sessionID: UUID, moduleID: String?) {
@@ -97,8 +102,12 @@ extension Engine {
         customInstrumentDefUIStates[defID]?.sidebarExpansion ?? .expanded
     }
 
-    public func sessionDetailSectionRaw(forSessionID sessionID: UUID) -> String? {
-        sessionUIStates[sessionID]?.detailSection
+    public func sidebarExpansion(forSessionID sessionID: UUID, group: SessionSidebarGroup) -> SidebarExpansion {
+        let state = sessionUIStates[sessionID]
+        switch group {
+        case .modules: return state?.modulesExpansion ?? .expanded
+        case .threads: return state?.threadsExpansion ?? .collapsed
+        }
     }
 
     public func lastSelectedModuleID(forSessionID sessionID: UUID) -> String? {

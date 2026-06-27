@@ -37,6 +37,21 @@ public struct ThreadDelta: Sendable {
     }
 }
 
+extension Array where Element == ProcessThread {
+    public func sidebarHighlights(
+        selectedID: ProcessThread.ID?,
+        limit: Int = SidebarHighlights.defaultLimit
+    ) -> [ProcessThread] {
+        guard let main = first else { return [] }
+        let rest = dropFirst()
+        let named = rest.filter { $0.name != nil }
+        let unnamed = rest.filter { $0.name == nil }
+        let peers = (named + unnamed).prefix(Swift.max(0, limit - 1))
+        let featured = [main] + peers
+        return featured.withSelected(selectedID, from: self, limit: limit)
+    }
+}
+
 public struct ProcessThread: Hashable, Identifiable, Codable, Sendable {
     public var id: UInt
     public var name: String?

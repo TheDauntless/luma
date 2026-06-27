@@ -7,11 +7,13 @@ enum ContextMenu {
     struct Item {
         let label: String
         let isDestructive: Bool
+        let isEnabled: Bool
         let handler: () -> Void
 
-        init(_ label: String, destructive: Bool = false, handler: @escaping () -> Void) {
+        init(_ label: String, destructive: Bool = false, enabled: Bool = true, handler: @escaping () -> Void) {
             self.label = label
             self.isDestructive = destructive
+            self.isEnabled = enabled
             self.handler = handler
         }
     }
@@ -62,6 +64,7 @@ enum ContextMenu {
         button.set(child: label)
         button.add(cssClass: "flat")
         button.add(cssClass: "luma-menu-item")
+        button.sensitive = item.isEnabled
 
         let handler = item.handler
         button.onClicked { _ in

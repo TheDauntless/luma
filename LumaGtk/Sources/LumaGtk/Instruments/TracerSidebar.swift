@@ -5,39 +5,42 @@ import LumaCore
 @MainActor
 enum TracerSidebar {
     static let inlineLimit = 5
-    static let rowMarginStart = MainWindow.sessionGrandchildMarginStart
 
     static func makeHookRow(hook: TracerConfig.Hook, status: InstrumentStatus?) -> (row: ListBoxRow, anchor: Box) {
-        let row = ListBoxRow()
-        let (rowBox, iconHost) = makeGrandchildRowBox()
-        iconHost.append(child: makeHookKindIcon(kind: hook.kind))
-        let label = Label(str: hook.displayName)
-        label.halign = .start
-        label.ellipsize = .end
-        rowBox.append(child: label)
-        if let status {
-            rowBox.append(child: InstrumentStatusPopover.makeIndicator(status: status))
-        }
-        if hook.state == .disabled {
-            rowBox.opacity = 0.5
-        }
-        rowBox.tooltipText = hook.addressAnchor.displayString
-        row.set(child: rowBox)
-        return (row, rowBox)
+        SidebarFeatureRow.make(
+            icon: makeHookKindIcon(kind: hook.kind),
+            title: hook.displayName,
+            dimmed: hook.state == .disabled,
+            tooltip: hook.addressAnchor.displayString,
+            accessory: status.map { InstrumentStatusPopover.makeIndicator(status: $0) }
+        )
     }
 
-    private static func makeGrandchildRowBox() -> (rowBox: Box, iconHost: Box) {
-        let rowBox = Box(orientation: .horizontal, spacing: 6)
-        rowBox.halign = .start
-        rowBox.marginStart = rowMarginStart
-        rowBox.marginEnd = 12
-        rowBox.marginTop = 2
-        rowBox.marginBottom = 2
-        let iconHost = Box(orientation: .horizontal, spacing: 0)
-        iconHost.setSizeRequest(width: 16, height: -1)
-        iconHost.hexpand = false
-        rowBox.append(child: iconHost)
-        return (rowBox, iconHost)
+    static func makeBrowseAllRow(totalCount: Int) -> (row: ListBoxRow, anchor: Box) {
+        SidebarFeatureRow.makeBrowseAll(totalCount: totalCount)
+    }
+
+    static func presentBrowser(
+        hooks: [TracerConfig.Hook],
+        anchor: Widget,
+        onChoose: @escaping @MainActor (TracerConfig.Hook) -> Void
+    ) {
+        let browser = SidebarBrowserPopover(
+            items: hooks,
+            placeholder: "Filter hooks",
+            emptyMessage: "No matching hooks",
+            groupName: { $0.addressAnchor.moduleGroupName },
+            title: { $0.displayName },
+            tooltip: { $0.addressAnchor.displayString },
+            dimmed: { $0.state == .disabled },
+            matches: { hook, query in
+                hook.displayName.localizedCaseInsensitiveContains(query)
+                    || hook.addressAnchor.moduleGroupName.localizedCaseInsensitiveContains(query)
+                    || hook.addressAnchor.displayString.localizedCaseInsensitiveContains(query)
+            },
+            onChoose: onChoose
+        )
+        browser.presentAnchored(to: anchor)
     }
 
     private static func makeHookKindIcon(kind: TracerHookKind) -> Widget {
@@ -54,31 +57,5 @@ enum TracerSidebar {
         label.valign = .center
         label.add(cssClass: "dim-label")
         return label
-    }
-
-    static func makeBrowseAllRow(totalCount: Int) -> (row: ListBoxRow, anchor: Box) {
-        let row = ListBoxRow()
-        let (rowBox, iconHost) = makeGrandchildRowBox()
-        let icon = Gtk.Image(iconName: "view-more-symbolic")
-        icon.pixelSize = 12
-        icon.hexpand = true
-        icon.halign = .center
-        icon.add(cssClass: "dim-label")
-        iconHost.append(child: icon)
-        let label = Label(str: "Browse all \(totalCount)\u{2026}")
-        label.halign = .start
-        label.add(cssClass: "dim-label")
-        rowBox.append(child: label)
-        row.set(child: rowBox)
-        return (row, rowBox)
-    }
-
-    static func presentBrowser(
-        hooks: [TracerConfig.Hook],
-        anchor: Widget,
-        onChoose: @escaping @MainActor (TracerConfig.Hook) -> Void
-    ) {
-        let browser = TracerHookBrowserPopover(hooks: hooks, onChoose: onChoose)
-        browser.presentAnchored(to: anchor)
     }
 }

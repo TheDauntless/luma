@@ -1,39 +1,59 @@
 import Foundation
 import Gdk
 import Gtk
-import LumaCore
 
 @MainActor
-final class TracerHookBrowserPopover {
-    private static var active: TracerHookBrowserPopover?
-
+final class SidebarBrowserPopover<Item> {
     private enum Entry {
         case sectionHeader(String)
-        case hook(TracerConfig.Hook)
+        case item(Item)
     }
 
-    private let hooks: [TracerConfig.Hook]
-    private let onChoose: (TracerConfig.Hook) -> Void
+    private let items: [Item]
+    private let placeholder: String
+    private let emptyMessage: String
+    private let groupName: (Item) -> String
+    private let title: (Item) -> String
+    private let tooltip: (Item) -> String?
+    private let dimmed: (Item) -> Bool
+    private let matches: (Item, String) -> Bool
+    private let onChoose: (Item) -> Void
 
+    private var retainer: SidebarBrowserPopover?
     private var popover: Popover?
     private var listBox: ListBox?
     private var entries: [Entry] = []
     private var query: String = ""
 
-    init(hooks: [TracerConfig.Hook], onChoose: @escaping (TracerConfig.Hook) -> Void) {
-        self.hooks = hooks
+    init(
+        items: [Item],
+        placeholder: String,
+        emptyMessage: String,
+        groupName: @escaping (Item) -> String,
+        title: @escaping (Item) -> String,
+        tooltip: @escaping (Item) -> String? = { _ in nil },
+        dimmed: @escaping (Item) -> Bool = { _ in false },
+        matches: @escaping (Item, String) -> Bool,
+        onChoose: @escaping (Item) -> Void
+    ) {
+        self.items = items
+        self.placeholder = placeholder
+        self.emptyMessage = emptyMessage
+        self.groupName = groupName
+        self.title = title
+        self.tooltip = tooltip
+        self.dimmed = dimmed
+        self.matches = matches
         self.onChoose = onChoose
     }
 
     func presentAnchored(to anchor: WidgetProtocol) {
-        TracerHookBrowserPopover.active = self
+        retainer = self
         let popover = Popover()
         popover.autohide = true
         popover.position = .right
         popover.onClosed { _ in
-            MainActor.assumeIsolated {
-                TracerHookBrowserPopover.active = nil
-            }
+            MainActor.assumeIsolated { self.retainer = nil }
         }
 
         let key = EventControllerKey()
@@ -56,7 +76,7 @@ final class TracerHookBrowserPopover {
         column.setSizeRequest(width: 320, height: 380)
 
         let searchEntry = SearchEntry()
-        searchEntry.placeholderText = "Filter hooks"
+        searchEntry.placeholderText = placeholder
         searchEntry.hexpand = true
         searchEntry.onSearchChanged { [weak self] entry in
             MainActor.assumeIsolated {
@@ -65,9 +85,7 @@ final class TracerHookBrowserPopover {
             }
         }
         searchEntry.onActivate { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.chooseFirstMatch()
-            }
+            MainActor.assumeIsolated { self?.chooseFirstMatch() }
         }
         column.append(child: searchEntry)
 
@@ -84,8 +102,8 @@ final class TracerHookBrowserPopover {
                 guard let self else { return }
                 let index = Int(row.index)
                 guard index >= 0, index < self.entries.count else { return }
-                if case .hook(let hook) = self.entries[index] {
-                    self.choose(hook)
+                if case .item(let item) = self.entries[index] {
+                    self.choose(item)
                 }
             }
         }
@@ -105,37 +123,27 @@ final class TracerHookBrowserPopover {
 
     private func refreshList() {
         guard let listBox else { return }
-        let matching = filteredHooks()
+        let matching = filteredItems()
 
         while let child = listBox.firstChild {
             listBox.remove(child: child)
         }
 
         entries = []
-        var previousModule: String?
-        for hook in matching {
-            let module = hook.addressAnchor.moduleGroupName
-            if module != previousModule {
-                entries.append(.sectionHeader(module))
-                listBox.append(child: makeSectionHeaderRow(name: module))
-                previousModule = module
+        var previousGroup: String?
+        for item in matching {
+            let group = groupName(item)
+            if group != previousGroup {
+                entries.append(.sectionHeader(group))
+                listBox.append(child: makeSectionHeaderRow(name: group))
+                previousGroup = group
             }
-            entries.append(.hook(hook))
-            listBox.append(child: makeHookRow(hook: hook))
+            entries.append(.item(item))
+            listBox.append(child: makeItemRow(item))
         }
 
         if matching.isEmpty {
-            let emptyRow = ListBoxRow()
-            emptyRow.selectable = false
-            let label = Label(str: "No matching hooks")
-            label.halign = .start
-            label.marginStart = 12
-            label.marginEnd = 12
-            label.marginTop = 6
-            label.marginBottom = 6
-            label.add(cssClass: "dim-label")
-            emptyRow.set(child: label)
-            listBox.append(child: emptyRow)
+            listBox.append(child: makeEmptyRow())
         }
     }
 
@@ -156,48 +164,58 @@ final class TracerHookBrowserPopover {
         return row
     }
 
-    private func filteredHooks() -> [TracerConfig.Hook] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return hooks }
-        return hooks.filter { hook in
-            hook.displayName.localizedCaseInsensitiveContains(trimmed)
-                || hook.addressAnchor.moduleGroupName.localizedCaseInsensitiveContains(trimmed)
-                || hook.addressAnchor.displayString.localizedCaseInsensitiveContains(trimmed)
-        }
-    }
-
-    private func makeHookRow(hook: TracerConfig.Hook) -> ListBoxRow {
+    private func makeItemRow(_ item: Item) -> ListBoxRow {
         let row = ListBoxRow()
         let box = Box(orientation: .horizontal, spacing: 6)
         box.marginStart = 12
         box.marginEnd = 12
         box.marginTop = 4
         box.marginBottom = 4
-        let label = Label(str: hook.displayName)
+        let label = Label(str: title(item))
         label.halign = .start
         label.hexpand = true
         label.ellipsize = .end
         box.append(child: label)
-        if hook.state == .disabled {
+        if dimmed(item) {
             box.opacity = 0.5
         }
-        box.tooltipText = hook.addressAnchor.displayString
+        box.tooltipText = tooltip(item)
         row.set(child: box)
         return row
     }
 
+    private func makeEmptyRow() -> ListBoxRow {
+        let row = ListBoxRow()
+        row.selectable = false
+        let label = Label(str: emptyMessage)
+        label.halign = .start
+        label.marginStart = 12
+        label.marginEnd = 12
+        label.marginTop = 6
+        label.marginBottom = 6
+        label.add(cssClass: "dim-label")
+        row.set(child: label)
+        return row
+    }
+
+    private func filteredItems() -> [Item] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return items }
+        return items.filter { matches($0, trimmed) }
+    }
+
     private func chooseFirstMatch() {
         for entry in entries {
-            if case .hook(let hook) = entry {
-                choose(hook)
+            if case .item(let item) = entry {
+                choose(item)
                 return
             }
         }
     }
 
-    private func choose(_ hook: TracerConfig.Hook) {
+    private func choose(_ item: Item) {
         dismiss()
-        onChoose(hook)
+        onChoose(item)
     }
 
     private func dismiss() {

@@ -20,12 +20,33 @@ public struct ModuleDelta: Sendable {
     }
 }
 
+public enum ModuleAnalysisStatus: Sendable, Hashable {
+    case notAnalyzed
+    case analyzing
+    case analyzed
+}
+
 extension Sequence where Element == ProcessModule {
     public func sortedByOrigin() -> [ProcessModule] {
         sorted { lhs, rhs in
             if lhs.isSystemModule != rhs.isSystemModule { return !lhs.isSystemModule }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
+    }
+}
+
+extension Array where Element == ProcessModule {
+    public func sidebarHighlights(
+        mainModule: ProcessModule?,
+        selectedID: ProcessModule.ID?,
+        limit: Int = SidebarHighlights.defaultLimit
+    ) -> [ProcessModule] {
+        let main = mainModule.flatMap { wanted in first { $0.id == wanted.id } } ?? first
+        let peers = filter { $0.id != main?.id && $0.isSystemModule == (main?.isSystemModule ?? false) }
+            .prefix(Swift.max(0, limit - 1))
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let featured = ([main].compactMap { $0 } + peers)
+        return featured.withSelected(selectedID, from: self, limit: limit)
     }
 }
 

@@ -55,6 +55,9 @@ struct SidebarView: View {
                     .tag(SidebarItemID.session(session.id))
 
                     if isExpanded {
+                        moduleGroup(session: session)
+                        threadGroup(session: session)
+
                         SidebarSessionREPLRow(sessionID: session.id)
                             .tag(SidebarItemID.repl(session.id))
 
@@ -123,6 +126,8 @@ struct SidebarView: View {
         switch selection {
         case .session(let id),
             .repl(let id),
+            .module(let id, _),
+            .thread(let id, _),
             .instrument(let id, _),
             .instrumentComponent(let id, _, _),
             .insight(let id, _),
@@ -130,6 +135,46 @@ struct SidebarView: View {
             return id
         default:
             return nil
+        }
+    }
+
+    @ViewBuilder
+    private func moduleGroup(session: LumaCore.ProcessSession) -> some View {
+        let count = session.lastKnownModules?.count ?? 0
+        let isExpanded = engine.sidebarExpansion(forSessionID: session.id, group: .modules) == .expanded
+        SidebarGroupHeaderRow(
+            title: "Modules",
+            systemImage: "shippingbox",
+            count: count,
+            isExpanded: isExpanded,
+            onToggle: { toggleGroupExpansion(sessionID: session.id, group: .modules) }
+        )
+        if isExpanded, count > 0 {
+            ModuleSidebarChildren(sessionID: session.id, engine: engine, selection: $selection)
+        }
+    }
+
+    @ViewBuilder
+    private func threadGroup(session: LumaCore.ProcessSession) -> some View {
+        let count = session.lastKnownThreads?.count ?? 0
+        let isExpanded = engine.sidebarExpansion(forSessionID: session.id, group: .threads) == .expanded
+        SidebarGroupHeaderRow(
+            title: "Threads",
+            systemImage: "cpu",
+            count: count,
+            isExpanded: isExpanded,
+            onToggle: { toggleGroupExpansion(sessionID: session.id, group: .threads) }
+        )
+        if isExpanded, count > 0 {
+            ThreadSidebarChildren(sessionID: session.id, engine: engine, selection: $selection)
+        }
+    }
+
+    private func toggleGroupExpansion(sessionID: UUID, group: SessionSidebarGroup) {
+        let current = engine.sidebarExpansion(forSessionID: sessionID, group: group)
+        let next: SidebarExpansion = current == .expanded ? .collapsed : .expanded
+        withAnimation(.easeInOut(duration: 0.18)) {
+            engine.setSidebarExpansion(sessionID: sessionID, group: group, next)
         }
     }
 
@@ -255,6 +300,48 @@ private struct SidebarMissionRow: View {
         case .failed: return .red
         default: return .secondary
         }
+    }
+}
+
+private struct SidebarGroupHeaderRow: View {
+    let title: String
+    let systemImage: String
+    let count: Int
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onToggle) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: sidebarChevronWidth, height: sidebarChevronWidth)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, sidebarChildIndent - sidebarChevronWidth - sidebarChevronToIconSpacing)
+            .padding(.trailing, sidebarChevronToIconSpacing)
+            .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
+
+            Image(systemName: systemImage)
+                .frame(width: sidebarChildIconWidth, alignment: .center)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.trailing, sidebarIconToLabelSpacing)
+
+            Text(title)
+                .font(.callout)
+            Spacer()
+            if count > 0 {
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 }
 

@@ -73,23 +73,17 @@ private struct TracerSidebarHookRow: View {
     @State private var draftMaxBytes: Int = ITraceArming.defaultMaxBytesPerInvocation
 
     var body: some View {
-        HStack(spacing: 6) {
-            hookIcon
-                .frame(width: 16, alignment: .center)
-                .foregroundStyle(.secondary)
-            Text(hook.displayName)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if let status = hookStatus {
-                InstrumentStatusIndicator(status: status)
+        SidebarFeatureRowLabel(
+            icon: { hookIcon },
+            title: hook.displayName,
+            isDimmed: hook.state != .enabled,
+            help: hook.addressAnchor.displayString,
+            accessory: {
+                if let status = hookStatus {
+                    InstrumentStatusIndicator(status: status)
+                }
             }
-            Spacer()
-        }
-        .font(.callout)
-        .contentShape(Rectangle())
-        .padding(.leading, sidebarGrandchildIndent)
-        .opacity(hook.state == .enabled ? 1 : 0.5)
-        .help(hook.addressAnchor.displayString)
+        )
         .contextMenu {
             Button {
                 toggleEnabled()
@@ -231,32 +225,14 @@ private struct TracerSidebarBrowseAllRow: View {
     let hooks: [TracerConfig.Hook]
     @Binding var selection: SidebarItemID?
 
-    @State private var isShowingBrowser = false
-
     var body: some View {
-        Button {
-            isShowingBrowser = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "ellipsis.circle")
-                    .frame(width: 16, alignment: .center)
-                    .foregroundStyle(.secondary)
-                Text("Browse all \(hooks.count)\u{2026}")
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-        }
-        .buttonStyle(.plain)
-        .font(.callout)
-        .contentShape(Rectangle())
-        .padding(.leading, sidebarGrandchildIndent)
-        .popover(isPresented: $isShowingBrowser, arrowEdge: .trailing) {
+        SidebarBrowseAllRow(count: hooks.count) { dismiss in
             TracerHookBrowserPopover(
                 sessionID: sessionID,
                 instanceID: instance.id,
                 hooks: hooks,
                 selection: $selection,
-                onDismiss: { isShowingBrowser = false }
+                onDismiss: dismiss
             )
         }
     }
