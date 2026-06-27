@@ -122,9 +122,9 @@ struct REPLView: View {
 
     #if canImport(UIKit)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    private var horizontalInset: CGFloat { horizontalSizeClass == .compact ? 6 : 16 }
+    private var horizontalInset: CGFloat { horizontalSizeClass == .compact ? 6 : 12 }
     #else
-    private var horizontalInset: CGFloat { 16 }
+    private var horizontalInset: CGFloat { 12 }
     #endif
 
     var body: some View {
