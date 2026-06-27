@@ -570,7 +570,7 @@ final class REPLPane {
         titleLabel.halign = .center
         titleGroup.append(child: titleLabel)
 
-        let subtitleLabel = Label(str: "Evaluate JavaScript in the target process.")
+        let subtitleLabel = Label(str: "Evaluate JavaScript in the target process,\nor run radare2 commands for disassembly and analysis.")
         subtitleLabel.add(cssClass: "dim-label")
         subtitleLabel.wrap = true
         subtitleLabel.justify = .center
@@ -585,8 +585,9 @@ final class REPLPane {
 
         for text in [
             "Type an expression and press Return to evaluate it.",
+            "Click the prompt \u{2014} or type :js / :r2 \u{2014} to switch between JavaScript and radare2.",
+            "In r2 mode, run commands like pdf, afl, or px 64.",
             "Step through previous expressions with \u{2191} and \u{2193}.",
-            "Try Process.mainModule.base.readByteArray(64).",
         ] {
             tips.append(child: makeTipRow(text: text))
         }

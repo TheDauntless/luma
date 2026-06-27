@@ -414,7 +414,7 @@ private struct REPLEmptyState: View {
                         Text("Read-Eval-Print Loop")
                             .font(.title2.weight(.semibold))
 
-                        Text("Evaluate JavaScript in the target process.")
+                        Text("Evaluate JavaScript in the target process,\nor run radare2 commands for disassembly and analysis.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -434,8 +434,9 @@ private struct REPLEmptyState: View {
     private var tips: some View {
         VStack(alignment: .leading, spacing: 8) {
             tip("Type an expression and press Return to evaluate it.")
+            tip("Click the prompt — or type :js / :r2 — to switch between JavaScript and radare2.")
+            tip("In r2 mode, run commands like pdf, afl, or px 64.")
             tip("Step through previous expressions with ↑ and ↓.")
-            tip("Try Process.mainModule.base.readByteArray(64).")
         }
         .font(.callout)
     }
