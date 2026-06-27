@@ -1150,6 +1150,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY"
+          sudo docker image prune --all --force || true
+          df -h
+
       - name: Set snap version
         run: |
           sed -i "s/^version: .*/version: '${LUMA_VERSION}'/" \
