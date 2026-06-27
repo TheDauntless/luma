@@ -2666,13 +2666,13 @@ public final class Engine {
         if !result.hasErrors, let structured = JSInspectValue.fromJSONText(output) {
             return .js(structured)
         }
-        let trimmed = String(output.drop(while: \.isNewline).reversed().drop(while: \.isNewline).reversed())
+        let trimmed = String(output.reversed().drop(while: \.isNewline).reversed())
         return .styled(StyledText.parseAnsi(combine(trimmed, errors: result.errors)))
     }
 
     private func combine(_ output: String, errors: [R2LogEntry]) -> String {
-        guard !errors.isEmpty else { return output }
-        let messages = errors.map(\.message).joined(separator: "\n")
+        let messages = errors.map(\.message).filter { !$0.isEmpty }.joined(separator: "\n")
+        guard !messages.isEmpty else { return output }
         return output.isEmpty ? messages : output + "\n" + messages
     }
 
