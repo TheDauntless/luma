@@ -33,7 +33,6 @@ final class SessionDetailView {
         let body = Box(orientation: .vertical, spacing: 12)
         body.marginStart = 16
         body.marginEnd = 16
-        body.marginTop = 16
         body.marginBottom = 16
         body.hexpand = true
         body.vexpand = true
