@@ -392,7 +392,7 @@ final class SessionDetailView {
     }
 
     private func renderModules(_ modules: [LumaCore.ProcessModule]) {
-        let sorted = modules.sorted(by: { $0.base < $1.base })
+        let sorted = modules.sortedByOrigin()
         currentSortedModules = sorted
         modulesButton.label = "Modules (\(modules.count))"
         clearListBox(modulesList)
@@ -405,7 +405,8 @@ final class SessionDetailView {
 
         for module in sorted {
             let row = Adw.ActionRow()
-            row.set(title: module.name)
+            let title = StyledTextPango.escape(module.name)
+            row.set(title: module.isSystemModule ? title : "<b>\(title)</b>")
             row.set(subtitle: String(format: "0x%llx · %@ bytes", module.base, formatNumber(module.size)))
             modulesList.append(child: row)
             attachModuleContextMenu(to: row, module: module)

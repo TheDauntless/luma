@@ -160,7 +160,7 @@ struct SessionDetailView: View {
     }
 
     private var modulesContent: some View {
-        let modules = (session?.lastKnownModules ?? []).sorted(by: { $0.base < $1.base })
+        let modules = (session?.lastKnownModules ?? []).sortedByOrigin()
         return PlatformHSplit {
             modulesTable(modules)
                 .frame(minWidth: 240, idealWidth: 360)
@@ -187,7 +187,9 @@ struct SessionDetailView: View {
                 placeholder("No modules loaded")
             } else {
                 Table(modules, selection: selectedModuleID) {
-                    TableColumn("Name", value: \.name)
+                    TableColumn("Name") { m in
+                        Text(m.name).fontWeight(m.isSystemModule ? .regular : .semibold)
+                    }
                     TableColumn("Base") { m in
                         PointerValueText(
                             engine: engine,

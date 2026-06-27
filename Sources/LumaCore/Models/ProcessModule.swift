@@ -20,6 +20,15 @@ public struct ModuleDelta: Sendable {
     }
 }
 
+extension Sequence where Element == ProcessModule {
+    public func sortedByOrigin() -> [ProcessModule] {
+        sorted { lhs, rhs in
+            if lhs.isSystemModule != rhs.isSystemModule { return !lhs.isSystemModule }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
 public struct ProcessModule: Hashable, Identifiable, Codable, Sendable {
     public var id: String { "\(path)@0x\(String(base, radix: 16))" }
     public let name: String
@@ -32,6 +41,16 @@ public struct ProcessModule: Hashable, Identifiable, Codable, Sendable {
         self.path = path
         self.base = base
         self.size = size
+    }
+
+    private static let systemPathPrefixes = ["/usr/lib", "/usr/local/lib", "/System/", "/Library/", "/lib/", "/lib64/", "/opt/"]
+
+    public var isSystemModule: Bool {
+        let windows = path.lowercased()
+        if windows.contains(":\\windows\\") || windows.hasPrefix("\\windows\\") {
+            return true
+        }
+        return Self.systemPathPrefixes.contains { path.hasPrefix($0) }
     }
 
     public func toJSON() -> [String: Any] {
