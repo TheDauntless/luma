@@ -237,6 +237,14 @@ public final class ProjectStore: Sendable {
         }
     }
 
+    public func deleteREPLCells(sessionID: UUID) throws {
+        try db.write { db in
+            _ = try REPLCell
+                .filter(Column("session_id") == sessionID)
+                .deleteAll(db)
+        }
+    }
+
     // MARK: - Notebook
 
     public func fetchNotebookEntries() throws -> [NotebookEntry] {

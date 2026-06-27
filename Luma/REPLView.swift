@@ -291,6 +291,7 @@ struct REPLView: View {
     }
 
     private func clearHistory() {
+        try? engine.store.deleteREPLCells(sessionID: sessionID)
         cells.removeAll()
         historyCursor = 0
     }

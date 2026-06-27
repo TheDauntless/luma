@@ -441,6 +441,7 @@ final class REPLPane {
     }
 
     private func clearHistory() {
+        try? engine?.store.deleteREPLCells(sessionID: sessionID)
         cells.removeAll()
         rowKeepers.removeAll()
         console.clearEntries()
