@@ -68,19 +68,34 @@ private struct PointerActions<Extra: View>: ViewModifier {
                 guard hovering, facts == nil else { return }
                 Task { facts = await engine.addressFacts(sessionID: sessionID, address: address, context: context) }
             }
-            .contextMenu { menu }
+            .contextMenu {
+                AddressMenuItems(
+                    engine: engine,
+                    sessionID: sessionID,
+                    value: value,
+                    address: address,
+                    context: context,
+                    copyTitle: copyTitle,
+                    facts: facts,
+                    selection: $selection,
+                    extraItems: extraItems
+                )
+            }
     }
+}
 
-    private var factsKey: FactsKey {
-        FactsKey(address: address, attached: engine.node(forSessionID: sessionID) != nil)
-    }
+struct AddressMenuItems<Extra: View>: View {
+    let engine: Engine
+    let sessionID: UUID
+    let value: String
+    let address: UInt64
+    let context: AddressContext
+    var copyTitle: String = "Copy"
+    let facts: AddressFacts?
+    @Binding var selection: SidebarItemID?
+    @ViewBuilder var extraItems: () -> Extra
 
-    private struct FactsKey: Equatable {
-        let address: UInt64
-        let attached: Bool
-    }
-
-    @ViewBuilder private var menu: some View {
+    var body: some View {
         Button {
             Platform.copyToClipboard(value)
         } label: {

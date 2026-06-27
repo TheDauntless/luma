@@ -11,6 +11,7 @@ struct ModuleDetailView: View {
     @State private var loadErrors: [LumaCore.ProcessModule.ID: String] = [:]
     @State private var tab: Tab = .exports
     @State private var selectedRowID: String?
+    @State private var facts: [UInt64: AddressFacts] = [:]
 
     enum Tab: String, CaseIterable, Identifiable {
         case exports = "Exports"
@@ -77,6 +78,11 @@ struct ModuleDetailView: View {
             TableColumn("Address") { e in rowCell(addressText(e.address), address: e.address, context: addressContext(for: e)) }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let e = rows.first(where: { $0.id == id }) {
+                addressMenu(address: e.address, context: addressContext(for: e))
+            }
+        }
     }
 
     private func importsTable(_ rows: [LumaCore.ModuleSymbolBundle.Import]) -> some View {
@@ -93,6 +99,11 @@ struct ModuleDetailView: View {
             }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let i = rows.first(where: { $0.id == id }), let addr = i.address {
+                addressMenu(address: addr, context: addressContext(for: i))
+            }
+        }
     }
 
     private func symbolsTable(_ rows: [LumaCore.ModuleSymbolBundle.Symbol]) -> some View {
@@ -110,6 +121,11 @@ struct ModuleDetailView: View {
             TableColumn("Address") { s in rowCell(addressText(s.address), address: s.address, context: addressContext(for: s)) }
         }
         .frame(minHeight: 240, idealHeight: 360)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let s = rows.first(where: { $0.id == id }) {
+                addressMenu(address: s.address, context: addressContext(for: s))
+            }
+        }
     }
 
     private func addressText(_ address: UInt64) -> some View {
@@ -129,29 +145,25 @@ struct ModuleDetailView: View {
     private func rowCell<V: View>(_ content: V, address: UInt64, context: AddressContext) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { openInsight(address: address, context: context) }
-            .pointerActions(
-                engine: engine,
-                sessionID: sessionID,
-                value: String(format: "0x%llx", address),
-                address: address,
-                context: context,
-                copyTitle: "Copy Address",
-                selection: $selection
-            )
+            .onHover { hovering in
+                guard hovering, facts[address] == nil else { return }
+                Task { facts[address] = await engine.addressFacts(sessionID: sessionID, address: address, context: context) }
+            }
     }
 
-    private func openInsight(address: UInt64, context: AddressContext) {
-        let kind: LumaCore.AddressInsight.Kind = context.kind == .data ? .memory : .disassembly
-        Task { @MainActor in
-            guard let insight = try? engine.getOrCreateInsight(
-                sessionID: sessionID,
-                pointer: address,
-                kind: kind,
-                preferredAnchor: context.anchorHint
-            ) else { return }
-            selection = .insight(sessionID, insight.id)
+    @ViewBuilder
+    private func addressMenu(address: UInt64, context: AddressContext) -> some View {
+        AddressMenuItems(
+            engine: engine,
+            sessionID: sessionID,
+            value: String(format: "0x%llx", address),
+            address: address,
+            context: context,
+            copyTitle: "Copy Address",
+            facts: facts[address],
+            selection: $selection
+        ) {
+            EmptyView()
         }
     }
 
