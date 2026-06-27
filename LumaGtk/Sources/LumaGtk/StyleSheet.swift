@@ -238,17 +238,20 @@ enum StyleSheet {
         margin: 0;
         padding: 0;
     }
-    .luma-js-expander > title {
+    .luma-js-expander > box > title {
         padding: 0;
         margin: 0;
         min-height: 0;
     }
-    .luma-js-expander > title > arrow {
-        min-width: 10px;
-        min-height: 10px;
-        -gtk-icon-size: 10px;
-        margin: 0 0 0 -4px;
+    .luma-js-expander > box > title > expander {
+        min-width: 0;
+        min-height: 0;
+        -gtk-icon-size: 12px;
+        margin: 0 0 0 -3px;
         opacity: 0.5;
+    }
+    .luma-js-expander > box > title > expander:checked {
+        margin-left: -1px;
     }
 
     expander title {
