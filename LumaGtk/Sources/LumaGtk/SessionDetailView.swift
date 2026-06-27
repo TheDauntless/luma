@@ -381,20 +381,13 @@ final class SessionDetailView {
         val.halign = .start
         val.selectable = false
         val.xalign = 0
+        val.hexpand = true
         if let engine {
             AddressActionMenu.attach(to: val, engine: engine, sessionID: sessionID, address: address, value: String(format: "0x%llx", address))
         }
 
-        let openButton = makeOpenMemoryButton(address: address)
-
-        let valueRow = Box(orientation: .horizontal, spacing: 6)
-        valueRow.hexpand = true
-        valueRow.halign = .start
-        valueRow.append(child: val)
-        valueRow.append(child: openButton)
-
         row.append(child: key)
-        row.append(child: valueRow)
+        row.append(child: val)
         summaryBox.append(child: row)
     }
 
@@ -490,36 +483,6 @@ final class SessionDetailView {
             }
         }
         anchor.install(controller: gesture)
-    }
-
-    private func makeOpenMemoryButton(address: UInt64) -> Image {
-        let icon = Image(iconName: "edit-find-symbolic")
-        icon.pixelSize = 14
-        icon.tooltipText = "Open Memory"
-        icon.valign = .center
-        icon.add(cssClass: "dim-label")
-
-        let click = GestureClick()
-        click.set(button: 1)
-        click.onReleased { [weak self] _, _, _, _ in
-            MainActor.assumeIsolated {
-                self?.openMemoryInsight(address: address)
-            }
-        }
-        icon.install(controller: click)
-
-        return icon
-    }
-
-    private func openMemoryInsight(address: UInt64) {
-        guard let engine else { return }
-        AddressActionMenu.openInsight(
-            engine: engine,
-            sessionID: sessionID,
-            address: address,
-            kind: .memory,
-            failureLabel: "Can\u{2019}t open memory"
-        )
     }
 
     private func makeEmptyRow(text: String) -> ListBoxRow {
