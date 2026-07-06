@@ -1,12 +1,13 @@
 import { encodeValue } from "./value.js";
 
+const evalInScope: (code: string) => any = eval;
+
 export function evaluate(
     code: string,
     { raw }: { raw: boolean }
 ): any {
     try {
-        // eslint-disable-next-line no-eval
-        const result = eval(code);
+        const result = evalInScope(hoistDeclarations(code));
 
         if (raw) {
             return result;
@@ -16,6 +17,10 @@ export function evaluate(
     } catch (e) {
         return encodeValue(e);
     }
+}
+
+function hoistDeclarations(code: string): string {
+    return code.replace(/^\s*(let|const)\b/, "var");
 }
 
 export interface CompletionItem {
@@ -131,8 +136,7 @@ function resolveBase(baseExpr: string | null): unknown {
     }
 
     try {
-        // eslint-disable-next-line no-eval
-        const base = eval(baseExpr);
+        const base = evalInScope(baseExpr);
         if (base === null || base === undefined) {
             return null;
         }
