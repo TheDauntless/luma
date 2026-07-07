@@ -932,6 +932,8 @@ private final class TracerHookSearch {
     }
 
     private func rebuildResults() {
+        let restoreEntryFocus = entryHasFocus()
+
         var child = listBox.firstChild
         while let current = child {
             child = current.nextSibling
@@ -992,6 +994,15 @@ private final class TracerHookSearch {
             row.set(child: inner)
             listBox.append(child: row)
         }
+
+        if restoreEntryFocus {
+            _ = entry.grabFocus()
+        }
+    }
+
+    private func entryHasFocus() -> Bool {
+        guard let focused = entry.root?.focus else { return false }
+        return focused.widget_ptr == entry.widget_ptr
     }
 }
 
