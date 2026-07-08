@@ -6,6 +6,7 @@
 /.build/
 /.swiftpm/
 /LumaGtk/.build/
+/LumaGtk/build/
 /LumaGtk/.swiftpm/
 /LumaGtk/Packages/
 LumaGtk/screenshots/

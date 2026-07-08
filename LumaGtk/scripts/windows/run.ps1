@@ -55,14 +55,15 @@ if (-not (Test-Path (Join-Path $schemaDir 'gschemas.compiled'))) {
     & (Join-Path $VcpkgPrefix 'tools\glib\glib-compile-schemas.exe') $schemaDir
 }
 
+$adwaitaShare = Join-Path $pkg 'build\share'
+& (Join-Path $script 'fetch-adwaita.ps1') -ShareDir $adwaitaShare -CacheDir (Join-Path $pkg 'build')
+
 $env:PATH = "$VcpkgPrefix\bin;$VcpkgPrefix\tools;$FridaPrefix\bin;$R2Prefix\bin;$env:PATH"
 $env:GDK_PIXBUF_MODULE_FILE = "$VcpkgPrefix\lib\gdk-pixbuf-2.0\2.10.0\loaders.cache"
 $env:GIO_EXTRA_MODULES = "$VcpkgPrefix\plugins\glib-networking"
-$env:XDG_DATA_DIRS = if ($env:XDG_DATA_DIRS) {
-    "$VcpkgPrefix\share;$env:XDG_DATA_DIRS"
-} else {
-    "$VcpkgPrefix\share"
-}
+$dataDirs = @("$VcpkgPrefix\share", $adwaitaShare)
+if ($env:XDG_DATA_DIRS) { $dataDirs += $env:XDG_DATA_DIRS }
+$env:XDG_DATA_DIRS = $dataDirs -join ';'
 
 # /SUBSYSTEM:WINDOWS means the shell won't wait for the exe by
 # default; Start-Process -Wait keeps the script synchronous.

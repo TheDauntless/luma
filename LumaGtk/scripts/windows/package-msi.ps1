@@ -190,63 +190,8 @@ $gioModulesStage = Join-Path $stage 'lib\gio\modules'
 New-Item -ItemType Directory -Force -Path $gioModulesStage | Out-Null
 Copy-Item $gioOpenssl $gioModulesStage -Force
 
-# vcpkg has no adwaita-icon-theme port, so fetch the upstream tarball
-# and stage Adwaita directly. Symbolic icons (e.g. accessories-
-# dictionary-symbolic in NotebookPane's empty state) live here, and
-# libadwaita falls back to this theme when it can't resolve a name
-# from its own GResource bundle. Skip cursors/ — 15 MB of X bitmap
-# cursors that Windows can't use.
 Write-Host "[stage] Adwaita icon theme"
-$adwaitaVersion = '50.0'
-$adwaitaSha256  = 'fac6e0401fca714780561a081b8f7e27c3bc1db34ebda4da175081f26b24d460'
-$adwaitaUrl     = "https://download.gnome.org/sources/adwaita-icon-theme/50/adwaita-icon-theme-$adwaitaVersion.tar.xz"
-$adwaitaTar     = Join-Path $OutputDir "adwaita-icon-theme-$adwaitaVersion.tar.xz"
-$adwaitaSrc     = Join-Path $OutputDir "adwaita-icon-theme-$adwaitaVersion"
-if (-not (Test-Path $adwaitaTar)) {
-    Invoke-WebRequest -Uri $adwaitaUrl -OutFile $adwaitaTar
-}
-$actualSha = (Get-FileHash $adwaitaTar -Algorithm SHA256).Hash.ToLower()
-if ($actualSha -ne $adwaitaSha256) {
-    throw "Adwaita tarball SHA-256 mismatch: expected $adwaitaSha256, got $actualSha"
-}
-if (Test-Path $adwaitaSrc) { Remove-Item -Recurse -Force $adwaitaSrc }
-# Invoke Windows' libarchive tar.exe by full path: setup-env.ps1
-# puts MSYS2's bin (with GNU tar) ahead on PATH for sed/awk, and
-# GNU tar reads the "D:" in a Windows path as a remote rcp host.
-Write-Host "[stage]   extracting Adwaita tarball"
-# bsdtar (System32\tar.exe) wedges extracting this tarball on the
-# hosted runner for hours, even with the lone symlink excluded — the
-# contents are unremarkable (1848 plain files), so it's a bsdtar/runner
-# quirk, not the data. Use 7-Zip instead: a separate implementation
-# that extracts symlinks as plain files and doesn't stall. Two passes,
-# since .tar.xz nests tar inside xz. Bound the inner extract so a
-# regression can't hang the build again.
-$sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Path
-if (-not $sevenZip) { $sevenZip = 'C:\Program Files\7-Zip\7z.exe' }
-if (-not (Test-Path $sevenZip)) { throw "7z.exe not found for Adwaita extraction" }
-
-& $sevenZip x $adwaitaTar "-o$OutputDir" -y -bso0 -bsp0
-if ($LASTEXITCODE -ne 0) { throw "Adwaita xz decompress failed ($LASTEXITCODE)" }
-$adwaitaInnerTar = Join-Path $OutputDir "adwaita-icon-theme-$adwaitaVersion.tar"
-
-$xErr = [System.IO.Path]::GetTempFileName()
-$xProc = Start-Process -FilePath $sevenZip `
-    -ArgumentList 'x', $adwaitaInnerTar, "-o$OutputDir", '-y', '-bso0', '-bsp0' `
-    -NoNewWindow -PassThru -RedirectStandardError $xErr
-if (-not $xProc.WaitForExit(120000)) {
-    $xProc.Kill()
-    throw "Adwaita extraction hung (>120s)"
-}
-$xExit = $xProc.ExitCode
-Get-Content $xErr -ErrorAction SilentlyContinue | Where-Object { $_ } | ForEach-Object { Write-Host "  7z: $_" }
-Remove-Item $xErr, $adwaitaInnerTar -ErrorAction SilentlyContinue
-if ($xExit -ne 0) { throw "Adwaita tar extract failed (exit $xExit)" }
-$adwaitaDest = Join-Path $stage 'share\icons\Adwaita'
-New-Item -ItemType Directory -Force -Path $adwaitaDest | Out-Null
-Copy-Item (Join-Path $adwaitaSrc 'index.theme') $adwaitaDest
-Copy-Tree (Join-Path $adwaitaSrc 'Adwaita\16x16')    (Join-Path $adwaitaDest '16x16')
-Copy-Tree (Join-Path $adwaitaSrc 'Adwaita\scalable') (Join-Path $adwaitaDest 'scalable')
-Copy-Tree (Join-Path $adwaitaSrc 'Adwaita\symbolic') (Join-Path $adwaitaDest 'symbolic')
+& (Join-Path $script 'fetch-adwaita.ps1') -ShareDir (Join-Path $stage 'share') -CacheDir $OutputDir
 
 # Compile the GLib schema XMLs so GTK can actually use them, then
 # drop the source XMLs — only gschemas.compiled is read at runtime.
