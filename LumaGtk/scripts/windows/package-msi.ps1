@@ -20,7 +20,8 @@ param(
     [string] $FridaPrefix,
     [string] $R2Prefix,
 
-    [switch] $SkipBuild
+    [switch] $SkipBuild,
+    [switch] $StageOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,22 +46,6 @@ if (-not $SkipBuild) {
         -FridaPrefix $FridaPrefix `
         -R2Prefix    $R2Prefix
 }
-
-$wixRoot = $env:WIX
-if (-not $wixRoot) {
-    foreach ($candidate in @(
-        'C:\Program Files (x86)\WiX Toolset v3.14',
-        'C:\Program Files (x86)\WiX Toolset v3.11'
-    )) {
-        if (Test-Path $candidate) { $wixRoot = $candidate; break }
-    }
-}
-if (-not $wixRoot -or -not (Test-Path $wixRoot)) {
-    throw "WiX Toolset not found. Install WiX 3.x or set `$env:WIX."
-}
-$heat   = Join-Path $wixRoot 'bin\heat.exe'
-$candle = Join-Path $wixRoot 'bin\candle.exe'
-$light  = Join-Path $wixRoot 'bin\light.exe'
 
 $triplet = @{
     'x86_64' = 'x86_64-unknown-windows-msvc'
@@ -207,6 +192,28 @@ if (Test-Path $schemasDir) {
         Where-Object { $_.Name -ne 'gschemas.compiled' } |
         Remove-Item -Force
 }
+
+if ($StageOnly) {
+    Write-Host ""
+    Write-Host "Staged deployment layout at $stage"
+    return
+}
+
+$wixRoot = $env:WIX
+if (-not $wixRoot) {
+    foreach ($candidate in @(
+        'C:\Program Files (x86)\WiX Toolset v3.14',
+        'C:\Program Files (x86)\WiX Toolset v3.11'
+    )) {
+        if (Test-Path $candidate) { $wixRoot = $candidate; break }
+    }
+}
+if (-not $wixRoot -or -not (Test-Path $wixRoot)) {
+    throw "WiX Toolset not found. Install WiX 3.x or set `$env:WIX."
+}
+$heat   = Join-Path $wixRoot 'bin\heat.exe'
+$candle = Join-Path $wixRoot 'bin\candle.exe'
+$light  = Join-Path $wixRoot 'bin\light.exe'
 
 if ($Version -match '^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?') {
     $build = if ($Matches[4]) { $Matches[4] } else { '0' }
