@@ -159,11 +159,12 @@ final class ModuleSymbolsPane {
         case .imports:
             for imp in bundle.imports {
                 let typeLabel = [imp.kind?.rawValue, imp.module].compactMap { $0 }.joined(separator: " · ")
+                let target = importTarget(imp)
                 list.append(child: makeRow(
                     title: imp.name,
                     typeLabel: typeLabel.isEmpty ? "import" : typeLabel,
-                    address: imp.address,
-                    context: importContext(imp)
+                    address: target.address,
+                    context: target.context
                 ))
             }
         case .symbols:
@@ -249,6 +250,16 @@ extension ModuleSymbolsPane {
             typeHint: export.kind.rawValue,
             anchorHint: .moduleExport(name: module.name, export: export.name)
         )
+    }
+
+    // Prefer the resolved target (the imported symbol itself, code or data); when
+    // the dynamic linker hasn't bound it yet, act on the IAT/GOT slot instead,
+    // which is a pointer-sized data location.
+    fileprivate func importTarget(_ imp: LumaCore.ModuleSymbolBundle.Import) -> (address: UInt64?, context: AddressContext) {
+        if imp.address != nil {
+            return (imp.address, importContext(imp))
+        }
+        return (imp.slot, AddressContext(kind: .data, typeHint: "import slot"))
     }
 
     fileprivate func importContext(_ imp: LumaCore.ModuleSymbolBundle.Import) -> AddressContext {
